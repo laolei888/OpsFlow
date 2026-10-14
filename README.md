@@ -1,6 +1,8 @@
 # OpsFlow
 
 [![OpsFlow CI](https://github.com/laolei888/OpsFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/laolei888/OpsFlow/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/laolei888/OpsFlow/actions/workflows/codeql.yml/badge.svg)](https://github.com/laolei888/OpsFlow/actions/workflows/codeql.yml)
+[![Supply Chain Security](https://github.com/laolei888/OpsFlow/actions/workflows/supply-chain.yml/badge.svg)](https://github.com/laolei888/OpsFlow/actions/workflows/supply-chain.yml)
 
 企业级工单与知识库协同平台，面向 Java 后端实习项目实践。
 
@@ -30,6 +32,7 @@
 - Grafana 可观测性工作台：预置 Prometheus、Tempo、Loki 数据源和 OpsFlow 服务仪表盘，支持从指标 exemplar 跳转 Trace、从 Trace 关联日志
 - Actuator 健康检查和指标入口
 - Docker Compose 编排 MySQL、Redis 和应用
+- 软件供应链安全：CodeQL 静态分析、Dependabot、依赖变更审查、Trivy 镜像扫描、SPDX SBOM、GHCR 镜像发布与来源证明
 - 工单服务状态机单元测试
 - 工单评论、协作时间线与操作审计日志
 - 按优先级计算 SLA 截止时间与租户级逾期汇总
@@ -150,6 +153,8 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 [docs/observability.md](docs/observability.md)。
 
 安全设计、生产环境变量和上线前检查项见 [docs/security.md](docs/security.md)。
+
+单机 HTTPS 演示环境、GHCR 镜像与供应链验证流程见 [docs/deployment.md](docs/deployment.md)。
 
 管理台：打开 http://localhost:8081/，使用自行注册或通过环境变量初始化的账号登录。登录页不会预填账号和密码；ADMIN 登录后还会看到“团队管理”工作台。
 

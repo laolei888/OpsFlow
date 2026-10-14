@@ -21,6 +21,7 @@ uploads/
 .env
 .env.*
 !.env.example
+!deploy/.env.demo.example
 application-local.yml
 application-local.yaml
 *.pem

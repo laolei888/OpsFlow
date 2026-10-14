@@ -17,6 +17,9 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -B -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:17-jre
+LABEL org.opencontainers.image.title="OpsFlow" \
+      org.opencontainers.image.description="Enterprise ticketing and knowledge collaboration platform" \
+      org.opencontainers.image.source="https://github.com/laolei888/OpsFlow"
 WORKDIR /app
 RUN groupadd --system opsflow \
     && useradd --system --gid opsflow --home-dir /app --shell /usr/sbin/nologin opsflow \
