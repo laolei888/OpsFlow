@@ -60,7 +60,7 @@ public class AdminUserController {
 
     public record CreateUserRequest(
             @NotBlank @Size(min = 4, max = 64) String username,
-            @NotBlank @Size(min = 8, max = 72) String password,
+            @NotBlank @Size(min = 10, max = 72) String password,
             @NotBlank @Size(max = 64) String displayName,
             @NotBlank String role) {
     }

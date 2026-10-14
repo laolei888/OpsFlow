@@ -97,4 +97,17 @@ class TicketImportServiceTest {
         assertThrows(BusinessException.class,
                 () -> TicketImportService.parseCsv("标题,描述\n\"未结束,内容"));
     }
+
+    @Test
+    void rejectsWrongExtensionAndBinaryCsvPayload() {
+        MockMultipartFile wrongExtension = new MockMultipartFile(
+                "file", "tickets.txt", "text/plain", "title,description\na,b".getBytes(StandardCharsets.UTF_8));
+        MockMultipartFile binary = new MockMultipartFile(
+                "file", "tickets.csv", "text/csv", new byte[]{'t', 'i', 't', 'l', 'e', 0, 'x'});
+
+        assertThrows(BusinessException.class,
+                () -> ticketImportService.importCsv(wrongExtension, 7L, 3L));
+        assertThrows(BusinessException.class,
+                () -> ticketImportService.importCsv(binary, 7L, 3L));
+    }
 }

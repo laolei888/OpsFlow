@@ -3,6 +3,7 @@ package com.opsflow.webhook;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.OutboundUrlPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class WebhookEndpointService {
     private final WebhookEndpointMapper endpointMapper;
     private final WebhookDeliveryMapper deliveryMapper;
     private final AuditLogService auditLogService;
+    private final OutboundUrlPolicy outboundUrlPolicy;
 
     public List<WebhookEndpointView> list(Long tenantId) {
         return endpointMapper.selectList(new LambdaQueryWrapper<WebhookEndpoint>()
@@ -201,6 +203,7 @@ public class WebhookEndpointService {
                     || uri.getHost() == null) {
                 throw new BusinessException("Webhook URL 必须是带域名的 HTTP 或 HTTPS 地址");
             }
+            outboundUrlPolicy.validate(value);
         } catch (IllegalArgumentException ex) {
             throw new BusinessException("Webhook URL 格式无效");
         }

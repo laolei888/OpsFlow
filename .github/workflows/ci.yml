@@ -87,6 +87,8 @@ jobs:
           curl --fail --silent http://localhost:8081/api-docs | grep -q '"title":"OpsFlow API"'
       - name: Verify OpenAPI contract
         run: node quality/openapi-contract.mjs
+      - name: Verify runtime security baseline
+        run: node quality/security-smoke.mjs
       - name: Verify metrics, traces and correlated logs
         run: node quality/observability-smoke.mjs
       - name: Run k6 performance baseline

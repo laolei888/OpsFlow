@@ -15,6 +15,10 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -22,6 +26,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,6 +36,15 @@ public class TicketAttachmentService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
             "png", "jpg", "jpeg", "gif", "pdf", "txt", "md", "csv",
             "doc", "docx", "xls", "xlsx", "zip", "log");
+    private static final Map<String, String> CANONICAL_CONTENT_TYPES = Map.ofEntries(
+            Map.entry("png", "image/png"), Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"), Map.entry("gif", "image/gif"),
+            Map.entry("pdf", "application/pdf"), Map.entry("txt", "text/plain"),
+            Map.entry("md", "text/markdown"), Map.entry("csv", "text/csv"),
+            Map.entry("log", "text/plain"), Map.entry("zip", "application/zip"),
+            Map.entry("doc", "application/msword"), Map.entry("xls", "application/vnd.ms-excel"),
+            Map.entry("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            Map.entry("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
 
     private final TicketAttachmentMapper attachmentMapper;
     private final TicketService ticketService;
@@ -63,6 +77,7 @@ public class TicketAttachmentService {
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             throw new BusinessException("不支持的附件类型，请上传图片、文档、表格、文本或压缩包");
         }
+        String verifiedContentType = verifyContent(file, extension);
 
         String storedName = UUID.randomUUID() + "." + extension;
         Path target = resolvePath(tenantId, ticketId, storedName);
@@ -80,8 +95,7 @@ public class TicketAttachmentService {
         attachment.setUploaderId(uploaderId);
         attachment.setOriginalName(originalName);
         attachment.setStoredName(storedName);
-        attachment.setContentType(file.getContentType() == null
-                ? "application/octet-stream" : file.getContentType());
+        attachment.setContentType(verifiedContentType);
         attachment.setSizeBytes(file.getSize());
         attachment.setStoragePath(relativePath(tenantId, ticketId, storedName));
         attachment.setCreatedAt(LocalDateTime.now());
@@ -181,6 +195,67 @@ public class TicketAttachmentService {
         int dot = name.lastIndexOf('.');
         if (dot <= 0 || dot == name.length() - 1) return "";
         return name.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String verifyContent(MultipartFile file, String extension) {
+        final byte[] content;
+        try {
+            content = file.getBytes();
+        } catch (IOException ex) {
+            throw new BusinessException("附件内容读取失败");
+        }
+        boolean valid = switch (extension) {
+            case "png" -> startsWith(content, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+            case "jpg", "jpeg" -> startsWith(content, 0xff, 0xd8, 0xff);
+            case "gif" -> startsWithAscii(content, "GIF87a") || startsWithAscii(content, "GIF89a");
+            case "pdf" -> startsWithAscii(content, "%PDF-");
+            case "zip", "docx", "xlsx" -> isZip(content);
+            case "doc", "xls" -> startsWith(content, 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+            case "txt", "md", "csv", "log" -> isUtf8Text(content);
+            default -> false;
+        };
+        if (!valid) {
+            throw new BusinessException("附件实际内容与文件扩展名不匹配");
+        }
+        return CANONICAL_CONTENT_TYPES.get(extension);
+    }
+
+    private boolean isZip(byte[] content) {
+        return startsWith(content, 0x50, 0x4b, 0x03, 0x04)
+                || startsWith(content, 0x50, 0x4b, 0x05, 0x06)
+                || startsWith(content, 0x50, 0x4b, 0x07, 0x08);
+    }
+
+    private boolean isUtf8Text(byte[] content) {
+        for (byte item : content) {
+            if (item == 0) return false;
+        }
+        try {
+            StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(content));
+            return true;
+        } catch (CharacterCodingException ex) {
+            return false;
+        }
+    }
+
+    private boolean startsWithAscii(byte[] content, String signature) {
+        byte[] expected = signature.getBytes(StandardCharsets.US_ASCII);
+        if (content.length < expected.length) return false;
+        for (int i = 0; i < expected.length; i++) {
+            if (content[i] != expected[i]) return false;
+        }
+        return true;
+    }
+
+    private boolean startsWith(byte[] content, int... signature) {
+        if (content.length < signature.length) return false;
+        for (int i = 0; i < signature.length; i++) {
+            if ((content[i] & 0xff) != signature[i]) return false;
+        }
+        return true;
     }
 
     private void deleteQuietly(Path path) {

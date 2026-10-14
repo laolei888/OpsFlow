@@ -1,6 +1,6 @@
 # OpsFlow API quality gates
 
-This directory contains three executable quality gates that run against a live OpsFlow stack.
+This directory contains four executable quality gates that run against a live OpsFlow stack.
 
 ## OpenAPI contract guard
 
@@ -13,6 +13,18 @@ node quality/openapi-contract.mjs
 ```
 
 Set `OPSFLOW_BASE_URL` to test another environment.
+
+## Security smoke test
+
+`security-smoke.mjs` verifies JSON 401 responses, browser security headers, CORS rejection for an
+unconfigured hostile origin, rate-limit headers, and the default login throttling threshold.
+
+```bash
+node quality/security-smoke.mjs
+```
+
+Run this only against a local or dedicated test environment because it deliberately sends failed
+login requests to confirm HTTP 429 behavior.
 
 ## Observability smoke test
 

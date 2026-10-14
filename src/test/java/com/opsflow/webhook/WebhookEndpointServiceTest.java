@@ -2,6 +2,7 @@ package com.opsflow.webhook;
 
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.OutboundUrlPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -22,10 +23,13 @@ class WebhookEndpointServiceTest {
     private WebhookDeliveryMapper deliveryMapper;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private OutboundUrlPolicy outboundUrlPolicy;
 
     @Test
     void createsEndpointWithGeneratedSecretAndMaskedView() {
-        WebhookEndpointService service = new WebhookEndpointService(endpointMapper, deliveryMapper, auditLogService);
+        WebhookEndpointService service = new WebhookEndpointService(endpointMapper, deliveryMapper, auditLogService,
+                outboundUrlPolicy);
         doAnswer(invocation -> {
             WebhookEndpoint endpoint = invocation.getArgument(0);
             endpoint.setId(12L);
@@ -45,7 +49,8 @@ class WebhookEndpointServiceTest {
 
     @Test
     void rejectsNonHttpWebhookUrl() {
-        WebhookEndpointService service = new WebhookEndpointService(endpointMapper, deliveryMapper, auditLogService);
+        WebhookEndpointService service = new WebhookEndpointService(endpointMapper, deliveryMapper, auditLogService,
+                outboundUrlPolicy);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.create(
                 new WebhookEndpointService.WebhookCommand("坏地址", "file:///tmp/hook", "secret", "*"),
@@ -56,7 +61,8 @@ class WebhookEndpointServiceTest {
 
     @Test
     void rejectsMalformedEventType() {
-        WebhookEndpointService service = new WebhookEndpointService(endpointMapper, deliveryMapper, auditLogService);
+        WebhookEndpointService service = new WebhookEndpointService(endpointMapper, deliveryMapper, auditLogService,
+                outboundUrlPolicy);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.create(
                 new WebhookEndpointService.WebhookCommand("格式检查", "https://example.com/hooks", "secret", "TICKET CREATED"),

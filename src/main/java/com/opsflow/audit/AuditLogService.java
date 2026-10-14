@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.SensitiveDataSanitizer;
 import com.opsflow.webhook.WebhookEventPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import java.util.Locale;
 public class AuditLogService {
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
+    private final SensitiveDataSanitizer sensitiveDataSanitizer;
     private final WebhookEventPublisher webhookEventPublisher;
 
     @Transactional
@@ -32,7 +34,7 @@ public class AuditLogService {
         log.setAction(action);
         log.setBeforeValue(toJson(beforeValue));
         log.setAfterValue(toJson(afterValue));
-        log.setDetail(detail);
+        log.setDetail(sensitiveDataSanitizer.sanitizeText(detail));
         log.setCreatedAt(LocalDateTime.now());
         auditLogMapper.insert(log);
         if (webhookEventPublisher != null) {
@@ -78,7 +80,7 @@ public class AuditLogService {
     private String toJson(Object value) {
         if (value == null) return null;
         try {
-            return objectMapper.writeValueAsString(value);
+            return objectMapper.writeValueAsString(sensitiveDataSanitizer.sanitize(value));
         } catch (JsonProcessingException ex) {
             throw new BusinessException("审计快照序列化失败");
         }

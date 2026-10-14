@@ -2,6 +2,8 @@ package com.opsflow.auth;
 
 import com.opsflow.common.ApiResponse;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.LoginAttemptService;
+import com.opsflow.security.OpsFlowSecurityProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -16,15 +18,28 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AuthController {
     private final AuthService authService;
+    private final LoginAttemptService loginAttemptService;
+    private final OpsFlowSecurityProperties securityProperties;
 
     @PostMapping("/register")
     public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+        if (!securityProperties.isRegistrationEnabled()) {
+            throw new BusinessException("当前环境未开放自助注册，请联系管理员创建账号");
+        }
         return ApiResponse.ok(authService.register(request.username(), request.password(), request.displayName()), "注册成功");
     }
 
     @PostMapping("/login")
     public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ApiResponse.ok(authService.login(request.username(), request.password()), "登录成功");
+        loginAttemptService.assertAllowed(request.username());
+        try {
+            AuthResponse response = authService.login(request.username(), request.password());
+            loginAttemptService.recordSuccess(request.username());
+            return ApiResponse.ok(response, "登录成功");
+        } catch (BusinessException ex) {
+            loginAttemptService.recordFailure(request.username());
+            throw ex;
+        }
     }
 
     @GetMapping("/staff")
@@ -50,8 +65,8 @@ public class AuthController {
 
     public record LoginRequest(@NotBlank String username, @NotBlank String password) { }
     public record RegisterRequest(@NotBlank @Size(min = 4, max = 64) String username,
-                                  @NotBlank @Size(min = 8, max = 72) String password,
+                                  @NotBlank @Size(min = 10, max = 72) String password,
                                   @NotBlank @Size(max = 64) String displayName) { }
     public record ChangePasswordRequest(@NotBlank String currentPassword,
-                                        @NotBlank @Size(min = 8, max = 72) String newPassword) { }
+                                        @NotBlank @Size(min = 10, max = 72) String newPassword) { }
 }

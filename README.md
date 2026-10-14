@@ -10,6 +10,9 @@
 
 - 用户注册、登录、JWT 无状态认证
 - BCrypt 密码存储与 tokenVersion 注销失效
+- 登录接口按来源 IP 限流，账号连续失败自动锁定；Redis 不可用时自动切换本机保护状态
+- 统一密码策略、生产环境必填 JWT/数据库/Redis 密钥，并默认关闭公开注册、接口文档与指标端点
+- 安全响应头、精确 CORS 白名单、JSON 401/403 响应和审计敏感字段脱敏
 - 用户角色模型和租户字段
 - 工单创建、分页查询、详情查询
 - 工单状态机流转与乐观锁版本字段
@@ -58,13 +61,13 @@
 - 监控告警中心（Alert Center）：为 Prometheus、Grafana 等监控源签发一次性接入密钥，按来源与指纹聚合重复信号；支持确认、抑制、恢复、维护静默窗口、CMDB 资产关联，以及按严重度规则通知当前值班人、自动创建工单或宣布重大事件
 - 服务状态中心（Status Page）：客服起草面向用户的服务公告，管理员审核发布；支持公开服务组件、影响等级、调查/定位/观察/恢复时间线、CMDB 与内部事故追溯关联、审计与 Webhook。内部告警和事故默认不公开，公开页面只返回经过审核的安全字段
 - 可靠性工程中心（SLO & Error Budget）：管理员为服务状态组件设定 1-90 天可用性目标与预算阈值；客服可记录 SLI 样本并关联监控告警证据，系统聚合窗口可用性、错误预算消耗并生成可确认/关闭的违规事件，违规可关联处置工单或重大事件，全链路进入审计与 Webhook
-- Webhook 集成中心：ADMIN 配置多租户 Webhook 订阅，按审计事件筛选并使用 HMAC-SHA256 签名；采用 Transactional Outbox 保证业务数据、审计日志和集成事件同事务提交，再由后台任务幂等展开投递记录，支持多实例并发抢占、失败指数退避、双层死信、人工重试、积压监控和 30 天已发布事件清理
+- Webhook 集成中心：ADMIN 配置多租户 Webhook 订阅，按审计事件筛选并使用 HMAC-SHA256 签名；采用 Transactional Outbox 保证业务数据、审计日志和集成事件同事务提交，再由后台任务幂等展开投递记录，支持多实例并发抢占、失败指数退避、双层死信、人工重试、积压监控和 30 天已发布事件清理；创建和实际投递前均执行 SSRF 地址校验
 - AGENT/ADMIN 客服目录与工单指派，指派动作进入审计时间线
 - 申请人的看板、SLA 汇总与工单列表按 requesterId 做资源级隔离
 - 可选环境变量初始化 AGENT/ADMIN 演示账号，不写死默认高权限密码
 - SLA 定时扫描与站内通知：逾期、24 小时内到期、未读数、单条/全部已读
 - 通知按 tenantId 与 recipientId 隔离，并通过 dedupeKey 避免重复提醒
-- 工单附件上传、列表、下载和删除，支持租户隔离、文件名清洗、类型与大小限制
+- 工单附件上传、列表、下载和删除，支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件
 - 图片附件详情页预览，继续复用带 JWT 的安全下载链路
 - ADMIN 团队管理：创建账号、启停用、角色调整，并保护最后一名管理员
 - ADMIN 全局审计日志检索：按动作、操作者和时间范围筛选
@@ -88,6 +91,9 @@
 ## 启动
 
 ```bash
+# 可选：复制配置模板后按需修改本地密钥和安全参数
+cp .env.example .env
+
 # 轻量业务栈：应用、MySQL、Redis
 docker compose up --build
 
@@ -102,7 +108,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 156 个业务单元测试，不依赖 Docker
+# 179 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -115,6 +121,9 @@ npm run build
 
 # 启动完整栈后执行接口契约守卫
 node quality/openapi-contract.mjs
+
+# 验证未授权响应、安全响应头、CORS 和登录限流
+node quality/security-smoke.mjs
 
 # 验证 Trace ID、Prometheus、Tempo、Loki 和 Grafana 的完整数据链路
 node quality/observability-smoke.mjs
@@ -130,7 +139,7 @@ docker compose --profile quality run --rm --no-deps k6
 
 仓库内的 GitHub Actions 会并行执行后端 `mvn verify`、前端生产构建和 Docker 镜像构建，
 并缓存 Maven、npm 与 BuildKit 依赖。镜像构建后还会启动完整 Compose 栈，自动检查应用健康、
-管理台首页、Swagger UI 和 OpenAPI JSON，随后执行 OpenAPI 契约回归守卫、可观测性全链路冒烟及 k6 性能阈值测试，
+管理台首页、Swagger UI 和 OpenAPI JSON，随后执行 OpenAPI 契约、安全基线、可观测性全链路冒烟及 k6 性能阈值测试，
 避免只验证编译、不验证运行。运行镜像使用非 root 用户，
 Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 
@@ -140,7 +149,9 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 可观测性设计、常用 PromQL/TraceQL/LogQL 查询和故障定位流程见
 [docs/observability.md](docs/observability.md)。
 
-管理台：打开 http://localhost:8081/，使用演示账号 opsflow_demo / opsflow123 登录。默认账号是 REQUESTER；ADMIN 登录后还会看到“团队管理”工作台。
+安全设计、生产环境变量和上线前检查项见 [docs/security.md](docs/security.md)。
+
+管理台：打开 http://localhost:8081/，使用自行注册或通过环境变量初始化的账号登录。登录页不会预填账号和密码；ADMIN 登录后还会看到“团队管理”工作台。
 
 接口文档：打开 http://localhost:8081/docs，在右上角 `Authorize` 中填入登录接口返回的 JWT，
 即可按业务模块调试受保护接口；原始 OpenAPI JSON 位于 http://localhost:8081/api-docs。
@@ -185,7 +196,7 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 如需演示客服工作台，可在启动 Compose 前配置一次性初始化账号；只有同时配置用户名和密码时才会创建，已有同名账号不会覆盖：
 
     $env:OPSFLOW_BOOTSTRAP_USERNAME = "opsflow_agent"
-    $env:OPSFLOW_BOOTSTRAP_PASSWORD = "请使用至少 8 位的本地演示密码"
+    $env:OPSFLOW_BOOTSTRAP_PASSWORD = "请使用至少 10 位的本地演示密码"
     $env:OPSFLOW_BOOTSTRAP_DISPLAY_NAME = "客服演示账号"
     $env:OPSFLOW_BOOTSTRAP_ROLE = "ADMIN"
     docker compose up -d --build
@@ -197,7 +208,7 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 ```bash
 curl -X POST http://localhost:8081/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"demo_user","password":"opsflow123","displayName":"Demo User"}'
+  -d '{"username":"demo_user","password":"StrongDemoPass!2026","displayName":"Demo User"}'
 ```
 
 登录并复制响应中的 `data.token`：
@@ -205,7 +216,7 @@ curl -X POST http://localhost:8081/api/v1/auth/register \
 ```bash
 curl -X POST http://localhost:8081/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"demo_user","password":"opsflow123"}'
+  -d '{"username":"demo_user","password":"StrongDemoPass!2026"}'
 ```
 
 创建工单：

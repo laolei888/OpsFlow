@@ -9,6 +9,7 @@ import com.opsflow.auth.UserMapper;
 import com.opsflow.auth.UserRole;
 import com.opsflow.auth.UserRoleMapper;
 import com.opsflow.auth.UserStatus;
+import com.opsflow.security.PasswordPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -40,6 +41,8 @@ class AdminUserServiceTest {
     private AuthService authService;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private PasswordPolicy passwordPolicy;
 
     @InjectMocks
     private AdminUserService adminUserService;
@@ -48,14 +51,14 @@ class AdminUserServiceTest {
     void createsActiveUserAndAuditsWithoutExposingPassword() {
         when(userMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(roleMapper.selectIdByCode("AGENT")).thenReturn(2L);
-        when(passwordEncoder.encode("password123")).thenReturn("encoded");
+        when(passwordEncoder.encode("StrongPassphrase!2026")).thenReturn("encoded");
         when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
             invocation.getArgument(0, User.class).setId(8L);
             return 1;
         });
         when(authService.rolesOf(8L)).thenReturn(List.of("AGENT"));
 
-        AdminUserView created = adminUserService.create("agent01", "password123", "客服一号",
+        AdminUserView created = adminUserService.create("agent01", "StrongPassphrase!2026", "客服一号",
                 "agent", 3L, 1L);
 
         assertEquals(8L, created.id());

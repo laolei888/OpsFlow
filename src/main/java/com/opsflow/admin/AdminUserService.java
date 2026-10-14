@@ -10,6 +10,7 @@ import com.opsflow.auth.UserRoleMapper;
 import com.opsflow.auth.UserStatus;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.PasswordPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class AdminUserService {
     private final PasswordEncoder passwordEncoder;
     private final AuthService authService;
     private final AuditLogService auditLogService;
+    private final PasswordPolicy passwordPolicy;
 
     public List<AdminUserView> list(Long tenantId) {
         return userMapper.selectList(new LambdaQueryWrapper<User>()
@@ -46,7 +48,7 @@ public class AdminUserService {
     public AdminUserView create(String username, String password, String displayName,
                                 String roleCode, Long tenantId, Long adminId) {
         String normalizedUsername = normalizeUsername(username);
-        validatePassword(password);
+        passwordPolicy.validate(password, normalizedUsername);
         String normalizedRole = normalizeRole(roleCode);
         String normalizedDisplayName = displayName == null || displayName.isBlank()
                 ? normalizedUsername : displayName.trim();
@@ -160,17 +162,11 @@ public class AdminUserService {
     }
 
     private String normalizeUsername(String username) {
-        String normalized = username == null ? "" : username.trim();
+        String normalized = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
         if (normalized.length() < 4 || normalized.length() > 64) {
             throw new BusinessException("用户名长度必须为 4-64 位");
         }
         return normalized;
-    }
-
-    private void validatePassword(String password) {
-        if (password == null || password.length() < 8 || password.length() > 72) {
-            throw new BusinessException("密码长度必须为 8-72 位");
-        }
     }
 
     private String normalizeRole(String roleCode) {

@@ -3,6 +3,7 @@ package com.opsflow.auth;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.PasswordPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -21,17 +22,21 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuditLogService auditLogService;
+    private final PasswordPolicy passwordPolicy;
+    private volatile String dummyPasswordHash;
 
     @Transactional
     public AuthResponse register(String username, String password, String displayName) {
-        if (userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getUsername, username)) != null) {
+        String normalizedUsername = normalizeUsername(username);
+        passwordPolicy.validate(password, normalizedUsername);
+        if (userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getUsername, normalizedUsername)) != null) {
             throw new BusinessException("用户名已存在");
         }
         LocalDateTime now = LocalDateTime.now();
         User user = new User();
-        user.setUsername(username);
+        user.setUsername(normalizedUsername);
         user.setPasswordHash(passwordEncoder.encode(password));
-        user.setDisplayName(displayName);
+        user.setDisplayName(displayName == null ? "" : displayName.trim());
         user.setTenantId(1L);
         user.setStatus(UserStatus.ACTIVE);
         user.setTokenVersion(0);
@@ -44,7 +49,12 @@ public class AuthService {
     }
 
     public AuthResponse login(String username, String password) {
-        User user = findByUsername(username);
+        String normalizedUsername = normalizeUsername(username);
+        User user = userMapper.selectByUsername(normalizedUsername);
+        if (user == null) {
+            passwordEncoder.matches(password == null ? "" : password, dummyPasswordHash());
+            throw new BusinessException("用户名或密码错误");
+        }
         if (user.getStatus() != UserStatus.ACTIVE || !passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new BusinessException("用户名或密码错误");
         }
@@ -53,20 +63,18 @@ public class AuthService {
     }
 
     public User findByUsername(String username) {
-        User user = userMapper.selectByUsername(username);
+        User user = userMapper.selectByUsername(normalizeUsername(username));
         if (user == null) throw new BusinessException("用户名或密码错误");
         return user;
     }
 
     @Transactional
     public void changePassword(Long userId, String currentPassword, String newPassword) {
-        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 72) {
-            throw new BusinessException("新密码长度必须为 8-72 位");
-        }
         User user = userMapper.selectById(userId);
         if (user == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new BusinessException("当前密码不正确");
         }
+        passwordPolicy.validate(newPassword, user.getUsername());
         if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
             throw new BusinessException("新密码不能与当前密码相同");
         }
@@ -109,16 +117,15 @@ public class AuthService {
         if (normalizedUsername.isBlank()) {
             throw new BusinessException("初始化账号用户名不能为空");
         }
-        if (password == null || password.length() < 8 || password.length() > 72) {
-            throw new BusinessException("初始化账号密码长度必须为 8-72 位");
-        }
+        String canonicalUsername = normalizeUsername(normalizedUsername);
+        passwordPolicy.validate(password, canonicalUsername);
 
         String normalizedRole = roleCode == null ? "AGENT" : roleCode.trim().toUpperCase(Locale.ROOT);
         if (!normalizedRole.equals("AGENT") && !normalizedRole.equals("ADMIN")) {
             throw new BusinessException("初始化账号角色只能是 AGENT 或 ADMIN");
         }
         if (userMapper.selectOne(new LambdaQueryWrapper<User>()
-                .eq(User::getUsername, normalizedUsername)) != null) {
+                .eq(User::getUsername, canonicalUsername)) != null) {
             return false;
         }
         if (roleMapper.selectIdByCode(normalizedRole) == null) {
@@ -127,7 +134,7 @@ public class AuthService {
 
         LocalDateTime now = LocalDateTime.now();
         User user = new User();
-        user.setUsername(normalizedUsername);
+        user.setUsername(canonicalUsername);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setDisplayName(displayName == null || displayName.isBlank() ? "OpsFlow 客服" : displayName.trim());
         user.setTenantId(tenantId == null ? 1L : tenantId);
@@ -161,5 +168,20 @@ public class AuthService {
     private AuthResponse response(User user) {
         return new AuthResponse(jwtService.generate(user), jwtService.expiresInSeconds(), user.getId(),
                 user.getUsername(), user.getDisplayName(), user.getTenantId(), user.getRoles());
+    }
+
+    private String normalizeUsername(String username) {
+        return username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String dummyPasswordHash() {
+        String current = dummyPasswordHash;
+        if (current != null) return current;
+        synchronized (this) {
+            if (dummyPasswordHash == null) {
+                dummyPasswordHash = passwordEncoder.encode("opsflow-dummy-password-never-used");
+            }
+            return dummyPasswordHash;
+        }
     }
 }

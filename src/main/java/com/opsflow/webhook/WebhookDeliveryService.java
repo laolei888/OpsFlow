@@ -2,13 +2,13 @@ package com.opsflow.webhook;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.common.BusinessException;
+import com.opsflow.security.OutboundUrlPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -26,13 +26,16 @@ public class WebhookDeliveryService {
     private final WebhookEndpointMapper endpointMapper;
     private final TransactionTemplate transactionTemplate;
     private final HttpClient httpClient;
+    private final OutboundUrlPolicy outboundUrlPolicy;
 
     public WebhookDeliveryService(WebhookDeliveryMapper deliveryMapper,
                                   WebhookEndpointMapper endpointMapper,
-                                  PlatformTransactionManager transactionManager) {
+                                  PlatformTransactionManager transactionManager,
+                                  OutboundUrlPolicy outboundUrlPolicy) {
         this.deliveryMapper = deliveryMapper;
         this.endpointMapper = endpointMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.outboundUrlPolicy = outboundUrlPolicy;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .build();
@@ -66,7 +69,7 @@ public class WebhookDeliveryService {
         Exception failure = null;
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(attempt.url()))
+                    .uri(outboundUrlPolicy.validate(attempt.url()))
                     .timeout(Duration.ofSeconds(5))
                     .header("Content-Type", "application/json")
                     .header("User-Agent", "OpsFlow-Webhook/1.0")

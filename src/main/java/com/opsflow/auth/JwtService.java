@@ -19,7 +19,14 @@ public class JwtService {
 
     public JwtService(@Value("${security.jwt.secret}") String secret,
                       @Value("${security.jwt.ttl:PT2H}") Duration ttl) {
-        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("JWT_SECRET 未配置");
+        }
+        byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (secretBytes.length < 32) {
+            throw new IllegalStateException("JWT_SECRET 至少需要 32 字节");
+        }
+        this.signingKey = Keys.hmacShaKeyFor(secretBytes);
         this.ttl = ttl;
     }
 

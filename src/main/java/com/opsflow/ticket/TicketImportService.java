@@ -7,6 +7,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -88,12 +91,26 @@ public class TicketImportService {
         if (file.getSize() > MAX_FILE_BYTES) {
             throw new BusinessException("CSV 文件不能超过 2MB");
         }
+        String filename = file.getOriginalFilename();
+        if (filename == null || !filename.trim().toLowerCase(Locale.ROOT).endsWith(".csv")) {
+            throw new BusinessException("请选择扩展名为 .csv 的文件");
+        }
     }
 
     private String readContent(MultipartFile file) {
         try {
-            return new String(file.getBytes(), StandardCharsets.UTF_8)
+            byte[] content = file.getBytes();
+            for (byte item : content) {
+                if (item == 0) throw new BusinessException("CSV 文件包含非法二进制内容");
+            }
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(content))
+                    .toString()
                     .replaceFirst("^\\uFEFF", "");
+        } catch (CharacterCodingException ex) {
+            throw new BusinessException("CSV 文件必须使用 UTF-8 编码");
         } catch (IOException ex) {
             throw new BusinessException("读取 CSV 文件失败");
         }

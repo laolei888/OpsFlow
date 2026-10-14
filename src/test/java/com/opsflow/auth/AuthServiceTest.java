@@ -2,6 +2,7 @@ package com.opsflow.auth;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.audit.AuditLogService;
+import com.opsflow.security.PasswordPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -31,6 +32,8 @@ class AuthServiceTest {
     private JwtService jwtService;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private PasswordPolicy passwordPolicy;
 
     @InjectMocks
     private AuthService authService;
