@@ -1,0 +1,26 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+local.file_match "opsflow_logs" {
+  path_targets = [{
+    "__path__"     = "/var/log/opsflow/*.log",
+    "job"          = "opsflow",
+    "service_name" = "opsflow",
+    "environment"  = "local",
+  }]
+  sync_period = "5s"
+}
+
+loki.source.file "opsflow" {
+  targets       = local.file_match.opsflow_logs.targets
+  forward_to    = [loki.write.local.receiver]
+  tail_from_end = false
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

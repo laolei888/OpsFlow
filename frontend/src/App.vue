@@ -684,22 +684,32 @@ async function api(path, options = {}) {
   if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json'
   if (token.value) headers.Authorization = `Bearer ${token.value}`
   const response = await fetch(path, { ...options, headers })
+  const traceId = response.headers.get('X-Trace-Id')
+  const requestId = response.headers.get('X-Request-Id')
+  const diagnosticId = traceId || requestId
+  const diagnosticHint = diagnosticId ? `（追踪编号：${diagnosticId}）` : ''
   if (response.status === 401 || response.status === 403) {
     logout()
-    throw new Error('登录已失效，请重新登录')
+    throw new Error(`登录已失效，请重新登录${diagnosticHint}`)
   }
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok || payload.success === false) throw new Error(payload.message || '请求失败')
+  if (!response.ok || payload.success === false) {
+    throw new Error(`${payload.message || '请求失败'}${diagnosticHint}`)
+  }
   return payload.data
 }
 
 async function downloadCsv(path, filename) {
   const response = await fetch(path, { headers: { Authorization: 'Bearer ' + token.value } })
+  const traceId = response.headers.get('X-Trace-Id')
+  const requestId = response.headers.get('X-Request-Id')
+  const diagnosticId = traceId || requestId
+  const diagnosticHint = diagnosticId ? `（追踪编号：${diagnosticId}）` : ''
   if (response.status === 401 || response.status === 403) {
     logout()
-    throw new Error('登录已失效，请重新登录')
+    throw new Error(`登录已失效，请重新登录${diagnosticHint}`)
   }
-  if (!response.ok) throw new Error('导出失败，请稍后重试')
+  if (!response.ok) throw new Error(`导出失败，请稍后重试${diagnosticHint}`)
   const blob = await response.blob()
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

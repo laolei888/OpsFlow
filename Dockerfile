@@ -20,7 +20,7 @@ FROM eclipse-temurin:17-jre
 WORKDIR /app
 RUN groupadd --system opsflow \
     && useradd --system --gid opsflow --home-dir /app --shell /usr/sbin/nologin opsflow \
-    && mkdir -p /app/uploads \
+    && mkdir -p /app/uploads /app/logs \
     && chown -R opsflow:opsflow /app
 COPY --from=build --chown=opsflow:opsflow /app/target/opsflow-0.0.1-SNAPSHOT.jar app.jar
 USER opsflow

@@ -22,6 +22,9 @@
 - OpenAPI 3 接口说明与 Swagger UI 在线调试，支持 JWT Bearer Token
 - OpenAPI 契约回归守卫：校验关键业务路由、公开接口鉴权豁免、工单参数、响应定义、路径规模和 operationId 唯一性
 - k6 性能基线：真实注册测试用户并携带 JWT 压测工单、运营总览、SLA 和公开状态页，CI 自动执行错误率与 p95 延迟门禁
+- OpenTelemetry + Micrometer 全链路观测：业务响应返回 Trace ID，日志同时携带 Trace ID、Span ID 与 Request ID，前端错误会展示可检索的追踪编号
+- Prometheus 指标与慢接口治理：开放标准 `/actuator/prometheus` 抓取端点，为 HTTP 延迟生成可聚合直方图，并按低基数路由记录超阈值请求
+- Grafana 可观测性工作台：预置 Prometheus、Tempo、Loki 数据源和 OpsFlow 服务仪表盘，支持从指标 exemplar 跳转 Trace、从 Trace 关联日志
 - Actuator 健康检查和指标入口
 - Docker Compose 编排 MySQL、Redis 和应用
 - 工单服务状态机单元测试
@@ -85,13 +88,21 @@
 ## 启动
 
 ```bash
+# 轻量业务栈：应用、MySQL、Redis
 docker compose up --build
+
+# 完整可观测栈：额外启用 Prometheus、Tempo、Loki、Alloy、Grafana
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
 ```
+
+完整可观测栈启动后，Grafana 位于 http://localhost:3000，默认本地账号为
+`admin / admin`；Prometheus 位于 http://localhost:9090，Tempo API 位于
+http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASSWORD` 修改密码。
 
 ## 测试与持续集成
 
 ```bash
-# 154 个业务单元测试，不依赖 Docker
+# 156 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -105,6 +116,9 @@ npm run build
 # 启动完整栈后执行接口契约守卫
 node quality/openapi-contract.mjs
 
+# 验证 Trace ID、Prometheus、Tempo、Loki 和 Grafana 的完整数据链路
+node quality/observability-smoke.mjs
+
 # 执行 k6 渐进式性能基线（最高 10 VU）
 docker compose --profile quality run --rm --no-deps k6
 ```
@@ -116,12 +130,15 @@ docker compose --profile quality run --rm --no-deps k6
 
 仓库内的 GitHub Actions 会并行执行后端 `mvn verify`、前端生产构建和 Docker 镜像构建，
 并缓存 Maven、npm 与 BuildKit 依赖。镜像构建后还会启动完整 Compose 栈，自动检查应用健康、
-管理台首页、Swagger UI 和 OpenAPI JSON，随后执行 OpenAPI 契约回归守卫及 k6 性能阈值测试，
+管理台首页、Swagger UI 和 OpenAPI JSON，随后执行 OpenAPI 契约回归守卫、可观测性全链路冒烟及 k6 性能阈值测试，
 避免只验证编译、不验证运行。运行镜像使用非 root 用户，
 Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 
 性能基线报告：[docs/performance-baseline.md](docs/performance-baseline.md)。当前报告用于持续回归，
 不把开发机上的短时测试结果解释为生产容量结论。
+
+可观测性设计、常用 PromQL/TraceQL/LogQL 查询和故障定位流程见
+[docs/observability.md](docs/observability.md)。
 
 管理台：打开 http://localhost:8081/，使用演示账号 opsflow_demo / opsflow123 登录。默认账号是 REQUESTER；ADMIN 登录后还会看到“团队管理”工作台。
 
@@ -486,7 +503,7 @@ curl http://localhost:8081/actuator/health
 
 1. 增加附件病毒扫描和异步隔离区
 2. 引入 RabbitMQ 处理异步通知与统计任务
-3. 增加 OpenTelemetry 链路追踪和持续容量趋势报告
+3. 基于当前 Prometheus 历史数据增加持续容量趋势报告和版本对比
 4. 增加邮件、企业微信等多渠道消息通知
 5. 增加 SSO/OIDC 与更细粒度的权限策略
 

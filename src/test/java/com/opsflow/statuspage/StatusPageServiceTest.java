@@ -54,7 +54,9 @@ class StatusPageServiceTest {
 
     @Test
     void publicSnapshotContainsOnlyPublicSafeFields() throws Exception {
+        LocalDateTime timestamp = LocalDateTime.of(2026, 1, 2, 3, 4, 5);
         StatusPageComponent component = component(31L, "order-api");
+        component.setUpdatedAt(timestamp);
         StatusPageIncident incident = new StatusPageIncident();
         incident.setId(71L);
         incident.setTenantId(3L);
@@ -65,8 +67,8 @@ class StatusPageServiceTest {
         incident.setImpact(StatusPageIncidentImpact.MAJOR);
         incident.setStatus(StatusPageIncidentStatus.INVESTIGATING);
         incident.setPublished(true);
-        incident.setPublishedAt(LocalDateTime.now());
-        incident.setUpdatedAt(LocalDateTime.now());
+        incident.setPublishedAt(timestamp);
+        incident.setUpdatedAt(timestamp);
         StatusPageIncidentComponent link = new StatusPageIncidentComponent();
         link.setTenantId(3L);
         link.setStatusIncidentId(71L);
@@ -74,7 +76,7 @@ class StatusPageServiceTest {
         StatusPageUpdate update = new StatusPageUpdate();
         update.setStatus(StatusPageIncidentStatus.INVESTIGATING);
         update.setMessage("我们正在调查此问题。");
-        update.setCreatedAt(LocalDateTime.now());
+        update.setCreatedAt(timestamp);
         when(componentMapper.selectList(any())).thenReturn(List.of(component));
         when(incidentMapper.selectList(any())).thenReturn(List.of(incident));
         when(incidentComponentMapper.selectList(any())).thenReturn(List.of(link));

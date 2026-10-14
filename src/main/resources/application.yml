@@ -33,10 +33,37 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${OPSFLOW_ENVIRONMENT:local}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 100ms,250ms,500ms,1s,2s,5s
+  tracing:
+    enabled: ${OPSFLOW_TRACING_ENABLED:false}
+    sampling:
+      probability: ${OPSFLOW_TRACING_SAMPLING_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OPSFLOW_OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+      timeout: 5s
+  opentelemetry:
+    resource-attributes:
+      service.name: ${spring.application.name}
+      deployment.environment: ${OPSFLOW_ENVIRONMENT:local}
+
+logging:
+  file:
+    name: ${OPSFLOW_LOG_PATH:}
+  pattern:
+    correlation: "[traceId=%X{traceId:-} spanId=%X{spanId:-} requestId=%X{opsflow.requestId:-}] "
 
 springdoc:
   api-docs:
@@ -56,6 +83,8 @@ security:
     ttl: PT2H
 
 opsflow:
+  observability:
+    slow-request-threshold: ${OPSFLOW_SLOW_REQUEST_THRESHOLD:500ms}
   bootstrap:
     username: ${OPSFLOW_BOOTSTRAP_USERNAME:}
     password: ${OPSFLOW_BOOTSTRAP_PASSWORD:}

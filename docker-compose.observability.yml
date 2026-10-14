@@ -1,0 +1,110 @@
+x-observability-logging: &observability-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    depends_on:
+      tempo:
+        condition: service_started
+    environment:
+      OPSFLOW_ENVIRONMENT: ${OPSFLOW_ENVIRONMENT:-local}
+      OPSFLOW_TRACING_ENABLED: "true"
+      OPSFLOW_TRACING_SAMPLING_PROBABILITY: ${OPSFLOW_TRACING_SAMPLING_PROBABILITY:-1.0}
+      OPSFLOW_OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      OPSFLOW_SLOW_REQUEST_THRESHOLD: ${OPSFLOW_SLOW_REQUEST_THRESHOLD:-500ms}
+      OPSFLOW_LOG_PATH: /app/logs/opsflow.log
+    volumes:
+      - opsflow_logs:/app/logs
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - opsflow_prometheus:/prometheus
+    depends_on:
+      app:
+        condition: service_started
+    logging: *observability-logging
+
+  tempo:
+    image: grafana/tempo:3.1.0
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    user: "0:0"
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - opsflow_tempo:/var/tempo
+    logging: *observability-logging
+
+  loki:
+    image: grafana/loki:3.7.8
+    command: ["-config.file=/etc/loki/loki.yml"]
+    user: "0:0"
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - opsflow_loki:/loki
+    logging: *observability-logging
+
+  alloy:
+    image: grafana/alloy:v1.20.1
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - opsflow_logs:/var/log/opsflow:ro
+      - opsflow_alloy:/var/lib/alloy/data
+    depends_on:
+      loki:
+        condition: service_started
+    logging: *observability-logging
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - opsflow_grafana:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+    logging: *observability-logging
+
+volumes:
+  opsflow_logs:
+  opsflow_prometheus:
+  opsflow_tempo:
+  opsflow_loki:
+  opsflow_alloy:
+  opsflow_grafana:

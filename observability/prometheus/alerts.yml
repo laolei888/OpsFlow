@@ -1,0 +1,59 @@
+groups:
+  - name: opsflow-service-health
+    rules:
+      - alert: OpsFlowTargetDown
+        expr: up{job="opsflow"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpsFlow cannot be scraped by Prometheus
+          description: The OpsFlow application target has been unavailable for more than one minute.
+
+      - alert: OpsFlowHighServerErrorRate
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{job="opsflow",status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(http_server_requests_seconds_count{job="opsflow"}[5m])), 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpsFlow server error rate is above 5%
+          description: More than 5% of HTTP requests have returned a 5xx response over the last five minutes.
+
+      - alert: OpsFlowP95LatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{job="opsflow"}[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpsFlow p95 latency is above one second
+          description: The service-wide HTTP p95 latency has remained above one second for five minutes.
+
+      - alert: OpsFlowSlowRequestsDetected
+        expr: sum(increase(opsflow_http_slow_requests_total{job="opsflow"}[5m])) > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpsFlow is recording slow API requests
+          description: More than five requests crossed the configured slow-request threshold in five minutes.
+
+      - alert: OpsFlowJvmHeapPressure
+        expr: |
+          sum(jvm_memory_used_bytes{job="opsflow",area="heap"})
+          /
+          clamp_min(sum(jvm_memory_max_bytes{job="opsflow",area="heap"}), 1) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpsFlow JVM heap usage is above 85%
+          description: JVM heap pressure has stayed above 85% for ten minutes.
