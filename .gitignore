@@ -1,5 +1,6 @@
 # Java / Maven
 target/
+.tools/
 *.class
 *.jar
 *.war
@@ -37,4 +38,5 @@ Thumbs.db
 # Test and coverage artifacts
 coverage/
 test-results/
+quality/reports/
 *.hprof

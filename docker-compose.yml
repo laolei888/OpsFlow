@@ -64,6 +64,19 @@ services:
     init: true
     logging: *default-logging
 
+  k6:
+    image: grafana/k6:2.2.0
+    profiles: ["quality"]
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      OPSFLOW_BASE_URL: http://app:8080
+    volumes:
+      - ./quality/k6:/scripts:ro
+    command: ["run", "--summary-mode=full", "/scripts/opsflow-smoke.js"]
+    logging: *default-logging
+
 volumes:
   opsflow_mysql:
   opsflow_redis:
