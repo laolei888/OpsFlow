@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22-alpine AS frontend-build
+FROM node:26-alpine AS frontend-build
 WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY frontend ./
 RUN npm run build
 
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
@@ -16,7 +16,7 @@ COPY --from=frontend-build /frontend/dist ./src/main/resources/static
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -B -Dmaven.test.skip=true package
 
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:24-jre
 LABEL org.opencontainers.image.title="OpsFlow" \
       org.opencontainers.image.description="Enterprise ticketing and knowledge collaboration platform" \
       org.opencontainers.image.source="https://github.com/laolei888/OpsFlow"
