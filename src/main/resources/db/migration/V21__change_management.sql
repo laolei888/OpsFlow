@@ -1,0 +1,62 @@
+CREATE TABLE IF NOT EXISTS change_requests (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    change_no VARCHAR(32) NOT NULL,
+    requester_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL,
+    change_type VARCHAR(32) NOT NULL,
+    risk_level VARCHAR(16) NOT NULL,
+    impact_scope VARCHAR(500) NULL,
+    implementation_plan TEXT NOT NULL,
+    validation_plan TEXT NULL,
+    rollback_plan TEXT NOT NULL,
+    scheduled_start DATETIME NULL,
+    scheduled_end DATETIME NULL,
+    status VARCHAR(32) NOT NULL,
+    linked_ticket_id BIGINT NULL,
+    request_key VARCHAR(128) NULL,
+    request_hash CHAR(64) NULL,
+    decision_comment VARCHAR(500) NULL,
+    decided_by BIGINT NULL,
+    decided_at DATETIME NULL,
+    started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_change_requests_tenant_no (tenant_id, change_no),
+    UNIQUE KEY uk_change_requests_idempotency (tenant_id, requester_id, request_key),
+    INDEX idx_change_requests_tenant_status (tenant_id, status, created_at),
+    INDEX idx_change_requests_tenant_risk (tenant_id, risk_level, status),
+    INDEX idx_change_requests_schedule (tenant_id, scheduled_start),
+    INDEX idx_change_requests_ticket (tenant_id, linked_ticket_id)
+);
+
+CREATE TABLE IF NOT EXISTS change_tasks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    change_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    assignee_id BIGINT NULL,
+    sort_order INT NOT NULL DEFAULT 100,
+    status VARCHAR(32) NOT NULL DEFAULT 'TODO',
+    completed_at DATETIME NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX idx_change_tasks_change_order (tenant_id, change_id, sort_order, id),
+    INDEX idx_change_tasks_assignee (tenant_id, assignee_id, status)
+);
+
+CREATE TABLE IF NOT EXISTS change_asset_links (
+    tenant_id BIGINT NOT NULL,
+    change_id BIGINT NOT NULL,
+    asset_id BIGINT NOT NULL,
+    link_type VARCHAR(32) NOT NULL DEFAULT 'AFFECTED',
+    note VARCHAR(500) NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (tenant_id, change_id, asset_id),
+    INDEX idx_change_asset_links_change (tenant_id, change_id),
+    INDEX idx_change_asset_links_asset (tenant_id, asset_id)
+);

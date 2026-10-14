@@ -1,0 +1,71 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: opsflow
+      MYSQL_USER: opsflow
+      MYSQL_PASSWORD: opsflow
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - opsflow_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    logging: *default-logging
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - opsflow_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+
+  app:
+    build: .
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: opsflow
+      DB_PASSWORD: opsflow
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Optional local demo account. Configure username and password together.
+      OPSFLOW_BOOTSTRAP_USERNAME: ${OPSFLOW_BOOTSTRAP_USERNAME:-}
+      OPSFLOW_BOOTSTRAP_PASSWORD: ${OPSFLOW_BOOTSTRAP_PASSWORD:-}
+      OPSFLOW_BOOTSTRAP_DISPLAY_NAME: ${OPSFLOW_BOOTSTRAP_DISPLAY_NAME:-OpsFlow 客服}
+      OPSFLOW_BOOTSTRAP_ROLE: ${OPSFLOW_BOOTSTRAP_ROLE:-AGENT}
+      OPSFLOW_BOOTSTRAP_TENANT_ID: ${OPSFLOW_BOOTSTRAP_TENANT_ID:-1}
+    ports:
+      - "8081:8080"
+    volumes:
+      - opsflow_uploads:/app/uploads
+    init: true
+    logging: *default-logging
+
+volumes:
+  opsflow_mysql:
+  opsflow_redis:
+
+  opsflow_uploads:

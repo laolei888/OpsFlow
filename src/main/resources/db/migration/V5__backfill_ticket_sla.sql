@@ -1,0 +1,8 @@
+UPDATE tickets
+SET due_at = CASE priority
+    WHEN 'URGENT' THEN DATE_ADD(created_at, INTERVAL 4 HOUR)
+    WHEN 'HIGH' THEN DATE_ADD(created_at, INTERVAL 8 HOUR)
+    WHEN 'LOW' THEN DATE_ADD(created_at, INTERVAL 72 HOUR)
+    ELSE DATE_ADD(created_at, INTERVAL 24 HOUR)
+END
+WHERE due_at IS NULL;

@@ -1,0 +1,77 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: opsflow
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:opsflow}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: ${DB_USERNAME:opsflow}
+    password: ${DB_PASSWORD:opsflow}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
+springdoc:
+  api-docs:
+    enabled: ${OPSFLOW_API_DOCS_ENABLED:true}
+    path: /api-docs
+  swagger-ui:
+    enabled: ${OPSFLOW_API_DOCS_ENABLED:true}
+    path: /docs
+    operations-sorter: alpha
+    tags-sorter: alpha
+    display-request-duration: true
+    persist-authorization: true
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:opsflow-development-secret-change-me-please-2026}
+    ttl: PT2H
+
+opsflow:
+  bootstrap:
+    username: ${OPSFLOW_BOOTSTRAP_USERNAME:}
+    password: ${OPSFLOW_BOOTSTRAP_PASSWORD:}
+    display-name: ${OPSFLOW_BOOTSTRAP_DISPLAY_NAME:OpsFlow 客服}
+    role: ${OPSFLOW_BOOTSTRAP_ROLE:AGENT}
+    tenant-id: ${OPSFLOW_BOOTSTRAP_TENANT_ID:1}
+  sla:
+    scan-interval-ms: 300000
+    initial-delay-ms: 15000
+  idempotency:
+    retention-hours: 24
+    cleanup-interval-ms: 3600000
+    initial-delay-ms: 60000
+  webhook:
+    delivery-interval-ms: 15000
+    initial-delay-ms: 20000
+  storage:
+    upload-dir: ${OPSFLOW_UPLOAD_DIR:/app/uploads}
+    max-file-size: 10485760

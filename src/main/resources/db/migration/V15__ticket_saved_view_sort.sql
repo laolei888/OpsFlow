@@ -1,0 +1,2 @@
+ALTER TABLE ticket_saved_views
+    ADD COLUMN sort VARCHAR(32) NOT NULL DEFAULT 'CREATED_DESC' AFTER priority;

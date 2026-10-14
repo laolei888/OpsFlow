@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS webhook_outbox_events (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    audit_log_id BIGINT NOT NULL,
+    event_id CHAR(64) NOT NULL,
+    event_type VARCHAR(80) NOT NULL,
+    actor_id BIGINT NULL,
+    resource_type VARCHAR(80) NULL,
+    resource_id BIGINT NULL,
+    payload_json LONGTEXT NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    next_attempt_at DATETIME NOT NULL,
+    claimed_at DATETIME NULL,
+    published_at DATETIME NULL,
+    last_error VARCHAR(1000) NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_webhook_outbox_audit (audit_log_id),
+    UNIQUE KEY uk_webhook_outbox_event (event_id),
+    INDEX idx_webhook_outbox_due (status, next_attempt_at, id),
+    INDEX idx_webhook_outbox_tenant_status (tenant_id, status, created_at)
+);

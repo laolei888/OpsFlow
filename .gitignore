@@ -1,0 +1,40 @@
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+*.log
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
+# Frontend assets copied into Spring Boot during local builds
+src/main/resources/static/
+
+# Runtime data
+.local-uploads/
+uploads/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.yaml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# IDE / operating system
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Test and coverage artifacts
+coverage/
+test-results/
+*.hprof

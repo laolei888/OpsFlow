@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS service_catalog_items (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(2000) NOT NULL,
+    category VARCHAR(64) NOT NULL,
+    default_priority VARCHAR(16) NOT NULL,
+    approval_required BOOLEAN NOT NULL DEFAULT FALSE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INT NOT NULL DEFAULT 100,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX idx_catalog_items_tenant_enabled (tenant_id, enabled, sort_order)
+);
+
+CREATE TABLE IF NOT EXISTS service_requests (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    request_no VARCHAR(32) NOT NULL UNIQUE,
+    tenant_id BIGINT NOT NULL,
+    catalog_item_id BIGINT NOT NULL,
+    requester_id BIGINT NOT NULL,
+    ticket_id BIGINT NULL,
+    request_key VARCHAR(128) NULL,
+    request_hash VARCHAR(64) NULL,
+    item_name VARCHAR(100) NOT NULL,
+    category VARCHAR(64) NOT NULL,
+    priority VARCHAR(16) NOT NULL,
+    summary VARCHAR(160) NOT NULL,
+    detail TEXT NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    decision_comment VARCHAR(500) NULL,
+    decided_by BIGINT NULL,
+    decided_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_service_request_idempotency (tenant_id, requester_id, request_key),
+    INDEX idx_service_requests_tenant_status (tenant_id, status, created_at),
+    INDEX idx_service_requests_requester (tenant_id, requester_id, created_at),
+    INDEX idx_service_requests_ticket (ticket_id)
+);
