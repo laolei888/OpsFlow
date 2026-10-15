@@ -21,7 +21,8 @@ LABEL org.opencontainers.image.title="OpsFlow" \
       org.opencontainers.image.description="Enterprise ticketing and knowledge collaboration platform" \
       org.opencontainers.image.source="https://github.com/laolei888/OpsFlow"
 WORKDIR /app
-RUN addgroup -S opsflow \
+RUN apk upgrade --no-cache \
+    && addgroup -S opsflow \
     && adduser -S -D -H -h /app -s /sbin/nologin -G opsflow opsflow \
     && mkdir -p /app/uploads /app/logs \
     && chown -R opsflow:opsflow /app

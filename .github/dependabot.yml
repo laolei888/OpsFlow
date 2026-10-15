@@ -53,7 +53,8 @@ updates:
       # Keep runtime/toolchain majors aligned with the versions verified by CI.
       - dependency-name: node
         update-types: ["version-update:semver-major"]
+      # The Maven tag embeds the JDK major after a non-semver suffix, so
+      # Dependabot cannot safely distinguish Maven patches from JDK jumps.
       - dependency-name: maven
-        update-types: ["version-update:semver-major"]
       - dependency-name: eclipse-temurin
         update-types: ["version-update:semver-major"]
