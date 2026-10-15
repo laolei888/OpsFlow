@@ -16,13 +16,13 @@ COPY --from=frontend-build /frontend/dist ./src/main/resources/static
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -B -Dmaven.test.skip=true package
 
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:17-jre-alpine
 LABEL org.opencontainers.image.title="OpsFlow" \
       org.opencontainers.image.description="Enterprise ticketing and knowledge collaboration platform" \
       org.opencontainers.image.source="https://github.com/laolei888/OpsFlow"
 WORKDIR /app
-RUN groupadd --system opsflow \
-    && useradd --system --gid opsflow --home-dir /app --shell /usr/sbin/nologin opsflow \
+RUN addgroup -S opsflow \
+    && adduser -S -D -H -h /app -s /sbin/nologin -G opsflow opsflow \
     && mkdir -p /app/uploads /app/logs \
     && chown -R opsflow:opsflow /app
 COPY --from=build --chown=opsflow:opsflow /app/target/opsflow-0.0.1-SNAPSHOT.jar app.jar
