@@ -36,7 +36,7 @@ const corsProbe = await request('/api/v1/status-page', {
 assert(!corsProbe.headers.has('access-control-allow-origin'),
   'Unconfigured cross-origin request was unexpectedly authorized')
 
-const runId = `${Date.now()}${Math.floor(Math.random() * 10_000)}`
+const runId = `${Date.now()}-${globalThis.crypto.randomUUID().replaceAll('-', '')}`
 async function invalidLogin(sequence) {
   return request('/api/v1/auth/login', {
     method: 'POST',

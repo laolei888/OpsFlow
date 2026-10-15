@@ -31,7 +31,7 @@ function parseJson(response, label) {
 }
 
 export function setup() {
-  const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
+  const suffix = `${Date.now()}`
   const username = `k6_${suffix}`
   const password = 'OpsFlow-k6-2026!'
 
