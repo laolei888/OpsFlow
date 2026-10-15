@@ -57,3 +57,48 @@ groups:
         annotations:
           summary: OpsFlow JVM heap usage is above 85%
           description: JVM heap pressure has stayed above 85% for ten minutes.
+
+      - alert: OpsFlowAsyncOutboxDead
+        expr: opsflow_messaging_outbox_dead{job="opsflow"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpsFlow has dead transactional outbox messages
+          description: At least one transactional outbox message exhausted all RabbitMQ publish retries.
+
+      - alert: OpsFlowAsyncMessageBacklogGrowing
+        expr: opsflow_messaging_outbox_pending{job="opsflow"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpsFlow asynchronous message backlog is growing
+          description: More than 100 messages have remained pending for at least five minutes.
+
+      - alert: OpsFlowRabbitMqTargetDown
+        expr: up{job="rabbitmq"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpsFlow RabbitMQ cannot be scraped
+          description: The RabbitMQ broker metrics endpoint has been unavailable for more than one minute.
+
+      - alert: OpsFlowNotificationDeadLetterQueue
+        expr: sum(rabbitmq_queue_messages_ready{job="rabbitmq",queue="opsflow.notifications.dead.v1"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpsFlow notification messages entered the dead-letter queue
+          description: At least one notification failed all consumer retries and requires investigation.
+
+      - alert: OpsFlowNotificationQueueBacklog
+        expr: sum(rabbitmq_queue_messages_ready{job="rabbitmq",queue="opsflow.notifications.v1"}) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpsFlow RabbitMQ notification queue is growing
+          description: More than 100 notifications have remained ready for at least five minutes.

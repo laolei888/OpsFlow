@@ -29,7 +29,8 @@ const requiredOperations = [
   ['get', '/api/v1/reliability'],
   ['get', '/api/v1/status-page'],
   ['get', '/api/v1/satisfaction/my-surveys'],
-  ['get', '/api/v1/admin/webhooks']
+  ['get', '/api/v1/admin/webhooks'],
+  ['get', '/api/v1/admin/async-messages/summary']
 ]
 
 const publicOperations = [

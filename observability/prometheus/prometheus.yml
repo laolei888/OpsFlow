@@ -13,3 +13,11 @@ scrape_configs:
         labels:
           service: opsflow
           environment: local
+
+  - job_name: rabbitmq
+    metrics_path: /metrics/per-object
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+        labels:
+          service: opsflow-rabbitmq
+          environment: local

@@ -3,7 +3,7 @@ package com.opsflow.dashboard;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +26,7 @@ public class DashboardReportSubscriptionService {
 
     private final DashboardReportSubscriptionMapper subscriptionMapper;
     private final DashboardService dashboardService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher asyncNotificationPublisher;
     private final AuditLogService auditLogService;
 
     @Transactional(readOnly = true)
@@ -135,8 +135,9 @@ public class DashboardReportSubscriptionService {
                 + "，已解决 " + report.resolvedTickets()
                 + "，SLA 达成率 " + report.slaComplianceRate()
                 + "%，当前逾期 " + report.overdueTickets() + "。";
-        notificationService.notifyIfAbsent(subscription.getTenantId(), subscription.getOwnerId(),
-                "REPORT_READY", title, content, dedupeKey);
+        asyncNotificationPublisher.enqueue(subscription.getTenantId(), subscription.getOwnerId(),
+                null, "REPORT_READY", title, content, dedupeKey,
+                "REPORT_SUBSCRIPTION", subscription.getId());
 
         LocalDateTime now = LocalDateTime.now();
         subscription.setLastRunAt(now);

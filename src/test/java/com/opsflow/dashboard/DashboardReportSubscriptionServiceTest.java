@@ -3,7 +3,7 @@ package com.opsflow.dashboard;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -29,7 +29,7 @@ class DashboardReportSubscriptionServiceTest {
     @Mock
     private DashboardService dashboardService;
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher asyncNotificationPublisher;
     @Mock
     private AuditLogService auditLogService;
 
@@ -64,16 +64,18 @@ class DashboardReportSubscriptionServiceTest {
         when(subscriptionMapper.selectOne(any(Wrapper.class))).thenReturn(subscription);
         when(dashboardService.report(eq(3L), any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(report());
-        when(notificationService.notifyIfAbsent(eq(3L), eq(7L), eq("REPORT_READY"),
-                contains("运营报表"), contains("新增"), contains("REPORT_SUBSCRIPTION")))
+        when(asyncNotificationPublisher.enqueue(eq(3L), eq(7L), eq(null), eq("REPORT_READY"),
+                contains("运营报表"), contains("新增"), contains("REPORT_SUBSCRIPTION"),
+                eq("REPORT_SUBSCRIPTION"), eq(9L)))
                 .thenReturn(true);
 
         DashboardReportSubscription result = subscriptionService.runNow(9L, 7L, 3L);
 
         assertThat(result.getLastRunAt()).isNotNull();
         assertThat(result.getNextRunAt()).isAfter(result.getLastRunAt());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(7L), eq("REPORT_READY"),
-                contains("运营报表"), contains("新增"), contains("REPORT_SUBSCRIPTION:9:"));
+        verify(asyncNotificationPublisher).enqueue(eq(3L), eq(7L), eq(null), eq("REPORT_READY"),
+                contains("运营报表"), contains("新增"), contains("REPORT_SUBSCRIPTION:9:"),
+                eq("REPORT_SUBSCRIPTION"), eq(9L));
         verify(subscriptionMapper).updateById(subscription);
         verify(auditLogService).record(eq(3L), eq(7L), eq("REPORT_SUBSCRIPTION"), eq(9L),
                 eq("REPORT_SUBSCRIPTION_RUN"), eq(null), eq(subscription), contains("手动"));

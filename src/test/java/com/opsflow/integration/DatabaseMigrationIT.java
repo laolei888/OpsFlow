@@ -38,10 +38,11 @@ class DatabaseMigrationIT {
     }
 
     @BeforeEach
-    void cleanSatisfactionFixtures() throws SQLException {
+    void cleanIntegrationFixtures() throws SQLException {
         try (Connection connection = connection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("DELETE FROM ticket_satisfaction_responses");
+            statement.executeUpdate("DELETE FROM async_message_outbox");
         }
     }
 
@@ -77,10 +78,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV37() {
+    void appliesEveryMigrationThroughV38() {
         assertNotNull(flyway.info().current());
-        assertEquals("37", flyway.info().current().getVersion().getVersion());
-        assertEquals(37, flyway.info().applied().length);
+        assertEquals("38", flyway.info().current().getVersion().getVersion());
+        assertEquals(38, flyway.info().applied().length);
     }
 
     @Test
@@ -118,6 +119,16 @@ class DatabaseMigrationIT {
         }
     }
 
+    @Test
+    void enforcesAsyncNotificationDedupePerTenantAndRecipient() throws SQLException {
+        insertAsyncMessage(1L, 7L, "message-0000000000000000000000000001", "REPORT:9");
+
+        assertThrows(SQLException.class,
+                () -> insertAsyncMessage(1L, 7L, "message-0000000000000000000000000002", "REPORT:9"));
+
+        insertAsyncMessage(1L, 8L, "message-0000000000000000000000000003", "REPORT:9");
+    }
+
     private void insertResponse(Long tenantId, Long ticketId, Long requesterId,
                                 Long assigneeId, Long groupId, int rating) throws SQLException {
         String sql = """
@@ -134,6 +145,26 @@ class DatabaseMigrationIT {
             statement.setLong(4, assigneeId);
             statement.setLong(5, groupId);
             statement.setInt(6, rating);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertAsyncMessage(Long tenantId, Long recipientId,
+                                    String messageId, String dedupeKey) throws SQLException {
+        String sql = """
+                INSERT INTO async_message_outbox
+                    (tenant_id, recipient_id, message_id, event_type, routing_key,
+                     aggregate_type, aggregate_id, dedupe_key, payload_json, status,
+                     attempt_count, next_attempt_at, created_at, updated_at)
+                VALUES (?, ?, ?, 'NOTIFICATION_REQUESTED', 'notification.requested.v1',
+                        'REPORT_SUBSCRIPTION', 9, ?, '{}', 'PENDING', 0, NOW(), NOW(), NOW())
+                """;
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, tenantId);
+            statement.setLong(2, recipientId);
+            statement.setString(3, messageId);
+            statement.setString(4, dedupeKey);
             statement.executeUpdate();
         }
     }

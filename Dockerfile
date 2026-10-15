@@ -22,8 +22,8 @@ LABEL org.opencontainers.image.title="OpsFlow" \
       org.opencontainers.image.source="https://github.com/laolei888/OpsFlow"
 WORKDIR /app
 RUN apk upgrade --no-cache \
-    && addgroup -S opsflow \
-    && adduser -S -D -H -h /app -s /sbin/nologin -G opsflow opsflow \
+    && addgroup -S -g 10001 opsflow \
+    && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin -G opsflow opsflow \
     && mkdir -p /app/uploads /app/logs \
     && chown -R opsflow:opsflow /app
 COPY --from=build --chown=opsflow:opsflow /app/target/opsflow-0.0.1-SNAPSHOT.jar app.jar

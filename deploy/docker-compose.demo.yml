@@ -7,6 +7,25 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  storage-init:
+    image: ghcr.io/laolei888/opsflow:${OPSFLOW_IMAGE_TAG:-main}
+    pull_policy: always
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 10001:10001 /app/uploads"]
+    volumes:
+      - uploads:/app/uploads
+    networks: [backend]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    restart: "no"
+    logging: *default-logging
+
   mysql:
     image: mysql:8.4
     restart: unless-stopped
@@ -42,15 +61,36 @@ services:
       retries: 20
     logging: *default-logging
 
+  rabbitmq:
+    image: rabbitmq:4.2-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-opsflow}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *default-logging
+
   app:
     image: ghcr.io/laolei888/opsflow:${OPSFLOW_IMAGE_TAG:-main}
     pull_policy: always
     restart: unless-stopped
     init: true
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
@@ -60,6 +100,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-opsflow}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       OPSFLOW_REGISTRATION_ENABLED: "false"
       OPSFLOW_API_DOCS_ENABLED: "false"
@@ -95,4 +139,5 @@ networks:
 volumes:
   mysql_data:
   redis_data:
+  rabbitmq_data:
   uploads:

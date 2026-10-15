@@ -14,6 +14,24 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:opsflow}
+    password: ${RABBITMQ_PASSWORD:opsflow}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          initial-interval: 1s
+          multiplier: 2
+          max-attempts: 5
+          max-interval: 30s
   servlet:
     multipart:
       max-file-size: 10MB
@@ -135,6 +153,11 @@ opsflow:
   webhook:
     delivery-interval-ms: 15000
     initial-delay-ms: 20000
+  messaging:
+    outbox-interval-ms: ${OPSFLOW_MESSAGING_OUTBOX_INTERVAL_MS:5000}
+    initial-delay-ms: ${OPSFLOW_MESSAGING_INITIAL_DELAY_MS:10000}
+    publish-confirm-timeout: ${OPSFLOW_MESSAGING_CONFIRM_TIMEOUT:5s}
+    consumer-concurrency: ${OPSFLOW_MESSAGING_CONSUMER_CONCURRENCY:2}
   storage:
     upload-dir: ${OPSFLOW_UPLOAD_DIR:/app/uploads}
     max-file-size: ${OPSFLOW_MAX_UPLOAD_BYTES:10485760}

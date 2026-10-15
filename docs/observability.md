@@ -8,6 +8,7 @@
 2. 哪一个标准化 API 路由出现了慢请求？
 3. 用户提供的追踪编号对应哪一条 Trace、哪些 Span 和哪些应用日志？
 4. JVM 内存、数据库连接池和业务 HTTP 指标在故障前后如何变化？
+5. RabbitMQ 事务消息是否积压、重试或进入死信？
 
 ## 数据链路
 
@@ -18,6 +19,7 @@
     │
     └─ OpsFlow Spring Boot
          ├─ Micrometer metrics ── /actuator/prometheus ── Prometheus
+         ├─ message outbox ────── RabbitMQ confirm/consume ── notification + DLQ
          ├─ OpenTelemetry spans ── OTLP/HTTP ───────────── Tempo
          └─ correlated logs ────── shared log volume ───── Alloy ── Loki
                                                                │
@@ -31,7 +33,7 @@ Spring MVC 的标准 HTTP Observation 负责创建服务端 Span 和
 
 ## 启动
 
-完整观测栈使用独立 Compose 叠加文件，因此普通开发仍可只启动应用、MySQL 和 Redis。
+完整观测栈使用独立 Compose 叠加文件，因此普通开发仍可只启动应用、MySQL、Redis 和 RabbitMQ。
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
@@ -48,6 +50,7 @@ node quality/observability-smoke.mjs
 | Tempo | http://localhost:3200 | TraceQL 与 Trace ID 查询 |
 | Loki | http://localhost:3100 | LogQL API |
 | Alloy | http://localhost:12345 | 日志采集组件状态 |
+| RabbitMQ | http://localhost:15672 | 队列、消费者、投递率和死信检查 |
 
 Grafana 会自动创建 `OpsFlow Service Overview` 仪表盘和三个数据源，不需要手工导入。
 默认对本地流量进行 100% 采样，生产环境应根据吞吐量调整：
@@ -79,6 +82,17 @@ histogram_quantile(0.95,
 
 # 最近五分钟慢请求数
 sum by (method, uri) (increase(opsflow_http_slow_requests_total{job="opsflow"}[5m]))
+
+# RabbitMQ 发布前的数据库 Outbox 积压
+opsflow_messaging_outbox_pending{job="opsflow"}
+
+# Broker 主队列与死信队列积压
+sum(rabbitmq_queue_messages_ready{job="rabbitmq",queue="opsflow.notifications.v1"})
+sum(rabbitmq_queue_messages_ready{job="rabbitmq",queue="opsflow.notifications.dead.v1"})
+
+# 消息消费和幂等去重速率
+sum(rate(opsflow_messaging_consume_succeeded_total{job="opsflow"}[5m]))
+sum(rate(opsflow_messaging_consume_deduplicated_total{job="opsflow"}[5m]))
 ```
 
 常用 TraceQL：

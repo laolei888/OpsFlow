@@ -19,6 +19,10 @@ services:
     volumes:
       - opsflow_logs:/app/logs
 
+  rabbitmq:
+    volumes:
+      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+
   prometheus:
     image: prom/prometheus:v3.14.0
     command:

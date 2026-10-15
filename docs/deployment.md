@@ -4,7 +4,7 @@
 
 ## 1. 准备主机
 
-建议使用安装了 Docker Engine 与 Compose 插件的 Linux 主机。只向公网开放 80/443；MySQL 和 Redis 位于 Compose 内部网络，不映射宿主机端口。
+建议使用安装了 Docker Engine 与 Compose 插件的 Linux 主机。只向公网开放 80/443；MySQL、Redis 和 RabbitMQ 位于 Compose 内部网络，不映射宿主机端口。
 
 ```bash
 git clone https://github.com/laolei888/OpsFlow.git
@@ -12,7 +12,7 @@ cd OpsFlow
 cp deploy/.env.demo.example deploy/.env.demo
 ```
 
-编辑 `deploy/.env.demo`，替换全部 `CHANGE_ME`，并将 `OPSFLOW_CORS_ALLOWED_ORIGINS` 改为实际 HTTPS 域名。`JWT_SECRET` 至少使用 32 个随机字符，例如：
+编辑 `deploy/.env.demo`，替换全部 `CHANGE_ME`，包括 MySQL、Redis、RabbitMQ 和 JWT 等独立密钥，并将 `OPSFLOW_CORS_ALLOWED_ORIGINS` 改为实际 HTTPS 域名。`JWT_SECRET` 至少使用 32 个随机字符，例如：
 
 ```bash
 openssl rand -base64 48
@@ -42,7 +42,7 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.demo.yml up 
 
 应用容器只提供 HTTP。应在主机前方配置 Caddy、Nginx、Traefik 或云负载均衡器终止 TLS，并把请求代理到 `127.0.0.1:8081`。不要把数据库、Redis、Swagger 或 Prometheus 指标直接暴露到公网。
 
-模板启用了生产配置并默认关闭公开注册、Swagger、公开指标、明文及私网出站访问；应用容器同时采用只读根文件系统、非 root 用户、能力移除和 `no-new-privileges`。单机模板中的应用到 MySQL 流量只经过隔离的 Docker 网络，因此 JDBC 示例关闭了 TLS；跨主机或使用托管数据库时必须改用服务商的 TLS 连接参数。
+模板启用了生产配置并默认关闭公开注册、Swagger、公开指标、明文及私网出站访问；应用容器同时采用只读根文件系统、固定 UID 10001 的非 root 用户、能力移除和 `no-new-privileges`。一次性 `storage-init` 容器只负责校正附件卷所有权，完成后退出。MySQL、Redis 与 RabbitMQ 均位于不可从宿主机直接访问的内部网络。单机模板中的 JDBC 和 AMQP 流量只经过隔离的 Docker 网络；跨主机或使用托管服务时必须启用服务商提供的 TLS 连接参数。
 
 ## 4. 镜像供应链
 
@@ -58,9 +58,9 @@ gh attestation verify oci://ghcr.io/laolei888/opsflow:main --repo laolei888/OpsF
 
 ## 5. 上线前检查
 
-- 使用不可复用的数据库、Redis、JWT 和管理员密码。
+- 使用不可复用的数据库、Redis、RabbitMQ、JWT 和管理员密码。
 - 通过 HTTPS 域名访问，并确认 CORS 只包含该域名。
 - 验证注册、文档和指标端点未对公网开放。
 - 建立 MySQL 与附件卷的定期备份和恢复演练。
 - 为主机、防火墙、磁盘、证书和容器状态配置外部监控。
-- 正式生产环境应使用托管数据库、Redis、高可用编排、集中密钥管理和独立对象存储。
+- 正式生产环境应使用托管数据库、Redis、RabbitMQ、高可用编排、集中密钥管理和独立对象存储。

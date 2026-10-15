@@ -129,6 +129,37 @@
       "targets": [{ "datasource": { "type": "loki", "uid": "loki" }, "editorMode": "code", "expr": "{service_name=\"opsflow\"}", "queryType": "range", "refId": "A" }],
       "title": "Correlated application logs",
       "type": "logs"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "id": 10,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "opsflow_messaging_outbox_pending{job=\"opsflow\"}", "legendFormat": "Pending", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "opsflow_messaging_outbox_failed{job=\"opsflow\"}", "legendFormat": "Retrying", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "opsflow_messaging_outbox_dead{job=\"opsflow\"}", "legendFormat": "Outbox dead", "range": true, "refId": "C" },
+        { "editorMode": "code", "expr": "sum(rabbitmq_queue_messages_ready{job=\"rabbitmq\",queue=\"opsflow.notifications.v1\"})", "legendFormat": "Broker ready", "range": true, "refId": "D" },
+        { "editorMode": "code", "expr": "sum(rabbitmq_queue_messages_ready{job=\"rabbitmq\",queue=\"opsflow.notifications.dead.v1\"})", "legendFormat": "Broker dead-letter", "range": true, "refId": "E" }
+      ],
+      "title": "Async message backlog",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "id": 11,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(rate(opsflow_messaging_publish_acknowledged_total{job=\"opsflow\"}[5m]))", "legendFormat": "Published", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum(rate(opsflow_messaging_consume_succeeded_total{job=\"opsflow\"}[5m]))", "legendFormat": "Consumed", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "sum(rate(opsflow_messaging_consume_deduplicated_total{job=\"opsflow\"}[5m]))", "legendFormat": "Deduplicated", "range": true, "refId": "C" },
+        { "editorMode": "code", "expr": "sum(rate(opsflow_messaging_consume_failed_total{job=\"opsflow\"}[5m]))", "legendFormat": "Failed", "range": true, "refId": "D" }
+      ],
+      "title": "Async messaging throughput",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
