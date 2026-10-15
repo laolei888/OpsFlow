@@ -1,6 +1,6 @@
 package com.opsflow.alert;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.cmdb.CmdbAssetService;

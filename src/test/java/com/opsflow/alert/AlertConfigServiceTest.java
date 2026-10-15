@@ -1,7 +1,7 @@
 package com.opsflow.alert;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.cmdb.CmdbAssetService;
 import com.opsflow.common.BusinessException;

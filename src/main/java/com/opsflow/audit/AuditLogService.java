@@ -1,8 +1,8 @@
 package com.opsflow.audit;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.opsflow.common.BusinessException;
 import com.opsflow.security.SensitiveDataSanitizer;
 import com.opsflow.webhook.WebhookEventPublisher;
@@ -81,7 +81,7 @@ public class AuditLogService {
         if (value == null) return null;
         try {
             return objectMapper.writeValueAsString(sensitiveDataSanitizer.sanitize(value));
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new BusinessException("审计快照序列化失败");
         }
     }

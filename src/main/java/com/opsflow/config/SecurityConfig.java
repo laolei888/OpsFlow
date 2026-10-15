@@ -1,6 +1,6 @@
 package com.opsflow.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.opsflow.auth.JwtAuthenticationFilter;
 import com.opsflow.common.ApiResponse;
 import com.opsflow.security.OpsFlowSecurityProperties;

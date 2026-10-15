@@ -1,8 +1,8 @@
 package com.opsflow.alert;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.auth.StaffSummary;
@@ -544,7 +544,7 @@ public class AlertService {
         if (labels == null || labels.isEmpty()) return null;
         try {
             return objectMapper.writeValueAsString(labels);
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new BusinessException("告警标签序列化失败");
         }
     }

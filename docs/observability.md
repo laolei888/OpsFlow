@@ -105,7 +105,7 @@ sum by (method, uri) (increase(opsflow_http_slow_requests_total{job="opsflow"}[5
 
 参考：
 
-- [Spring Boot 3.4 Tracing](https://docs.spring.io/spring-boot/3.4/reference/actuator/tracing.html)
-- [Spring Boot Prometheus endpoint](https://docs.spring.io/spring-boot/3.4/api/rest/actuator/prometheus.html)
+- [Spring Boot Tracing](https://docs.spring.io/spring-boot/reference/actuator/tracing.html)
+- [Spring Boot Prometheus endpoint](https://docs.spring.io/spring-boot/api/rest/actuator/prometheus.html)
 - [Grafana Tempo data source](https://grafana.com/docs/grafana/latest/datasources/tempo/)
 - [Grafana Alloy file log collection](https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.file/)

@@ -10,6 +10,7 @@
 
 当前后端 MVP 已包含：
 
+- 现代 Java 后端基线：Java 17、Spring Boot 4.1.1、Spring Framework 7、Jackson 3、Tomcat 11、MyBatis-Plus 3.5.17
 - 用户注册、登录、JWT 无状态认证
 - BCrypt 密码存储与 tokenVersion 注销失效
 - 登录接口按来源 IP 限流，账号连续失败自动锁定；Redis 不可用时自动切换本机保护状态

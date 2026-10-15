@@ -1,8 +1,8 @@
 package com.opsflow.webhook;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.opsflow.audit.AuditLog;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -39,7 +39,7 @@ public class WebhookEventPublisher {
         String payload;
         try {
             payload = objectMapper.writeValueAsString(payload(audit, eventId, eventType));
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new IllegalStateException("Unable to serialize webhook outbox event", ex);
         }
 
@@ -97,7 +97,7 @@ public class WebhookEventPublisher {
         try {
             JsonNode node = objectMapper.readTree(value);
             return node == null ? value : node;
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             return value;
         }
     }

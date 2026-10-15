@@ -1,6 +1,7 @@
 package com.opsflow.statuspage;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.cmdb.CmdbAssetService;
 import com.opsflow.incident.IncidentMapper;
@@ -83,7 +84,7 @@ class StatusPageServiceTest {
         when(updateMapper.selectList(any())).thenReturn(List.of(update));
 
         StatusPageService.PublicStatusPage snapshot = service.publicSnapshot(3L);
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(snapshot);
+        String json = JsonMapper.builder().findAndAddModules().build().writeValueAsString(snapshot);
 
         assertEquals("SP-ABC123", snapshot.incidents().get(0).publicNo());
         assertEquals(List.of("order-api"), snapshot.incidents().get(0).componentSlugs());
