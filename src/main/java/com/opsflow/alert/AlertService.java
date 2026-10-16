@@ -12,7 +12,7 @@ import com.opsflow.common.BusinessException;
 import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentService;
 import com.opsflow.incident.IncidentSeverity;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.oncall.OnCallRecipientResolver;
 import com.opsflow.runbook.RunbookService;
 import com.opsflow.ticket.Ticket;
@@ -41,7 +41,7 @@ public class AlertService {
     private final CmdbAssetService cmdbAssetService;
     private final TicketService ticketService;
     private final IncidentService incidentService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final OnCallRecipientResolver onCallRecipientResolver;
     private final RunbookService runbookService;
     private final AuthService authService;
@@ -376,10 +376,11 @@ public class AlertService {
         String link = alert.getIncidentId() != null ? "，已升级为重大事件 #" + alert.getIncidentId()
                 : alert.getTicketId() != null ? "，已创建工单 #" + alert.getTicketId() : "";
         for (Long recipientId : recipients) {
-            notificationService.notifyIfAbsent(alert.getTenantId(), recipientId, "MONITORING_ALERT",
-                    "监控告警 · " + alert.getSeverity(),
+            notificationPublisher.enqueue(alert.getTenantId(), recipientId, null,
+                    "MONITORING_ALERT", "监控告警 · " + alert.getSeverity(),
                     "「" + alert.getTitle() + "」来自 " + source.getName() + link,
-                    "MONITORING_ALERT:" + alert.getId() + ":" + alert.getGeneration() + ":" + recipientId);
+                    "MONITORING_ALERT:" + alert.getId() + ":" + alert.getGeneration() + ":" + recipientId,
+                    "MONITORING_ALERT", alert.getId());
         }
     }
 

@@ -32,6 +32,7 @@ const requiredOperations = [
   ['get', '/api/v1/admin/webhooks'],
   ['get', '/api/v1/admin/async-messages'],
   ['get', '/api/v1/admin/async-messages/summary'],
+  ['get', '/api/v1/admin/async-messages/{id}'],
   ['post', '/api/v1/admin/async-messages/retry']
 ]
 

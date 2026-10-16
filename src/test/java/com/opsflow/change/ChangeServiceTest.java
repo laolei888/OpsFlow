@@ -8,7 +8,7 @@ import com.opsflow.cmdb.AssetStatus;
 import com.opsflow.cmdb.CmdbAsset;
 import com.opsflow.cmdb.CmdbAssetMapper;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.TicketService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,7 +42,7 @@ class ChangeServiceTest {
     @Mock
     private AuthService authService;
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher notificationPublisher;
     @Mock
     private AuditLogService auditLogService;
 
@@ -62,8 +62,9 @@ class ChangeServiceTest {
 
         assertEquals(ChangeStatus.APPROVED, result.getStatus());
         verify(taskMapper, org.mockito.Mockito.times(2)).insert(any(ChangeTask.class));
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(7L), eq("CHANGE_APPROVED"),
-                contains("预批准"), contains("标准低风险"), eq("CHANGE_APPROVED:31"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(7L), eq(null), eq("CHANGE_APPROVED"),
+                contains("预批准"), contains("标准低风险"), eq("CHANGE_APPROVED:31"),
+                eq("CHANGE_REQUEST"), eq(31L));
         verify(authService, never()).staffMembers(3L);
     }
 
@@ -80,8 +81,9 @@ class ChangeServiceTest {
                 null, 7L, 7L, 3L);
 
         assertEquals(ChangeStatus.PENDING_APPROVAL, result.getStatus());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(9L), eq("CHANGE_APPROVAL_REQUIRED"),
-                contains("待审批"), contains("数据库升级"), eq("CHANGE_APPROVAL_REQUIRED:32"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(9L), eq(null), eq("CHANGE_APPROVAL_REQUIRED"),
+                contains("待审批"), contains("数据库升级"), eq("CHANGE_APPROVAL_REQUIRED:32"),
+                eq("CHANGE_REQUEST"), eq(32L));
     }
 
     @Test
@@ -94,8 +96,9 @@ class ChangeServiceTest {
 
         assertEquals(ChangeStatus.APPROVED, result.getStatus());
         assertEquals(9L, result.getDecidedBy());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(7L), eq("CHANGE_APPROVED"),
-                contains("已通过"), contains("数据库升级"), eq("CHANGE_APPROVED:31"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(7L), eq(null), eq("CHANGE_APPROVED"),
+                contains("已通过"), contains("数据库升级"), eq("CHANGE_APPROVED:31"),
+                eq("CHANGE_REQUEST"), eq(31L));
     }
 
     @Test

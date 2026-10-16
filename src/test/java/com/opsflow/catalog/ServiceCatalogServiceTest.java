@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.auth.StaffSummary;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketPriority;
 import com.opsflow.ticket.TicketService;
@@ -35,7 +35,7 @@ class ServiceCatalogServiceTest {
     @Mock
     private TicketService ticketService;
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher notificationPublisher;
     @Mock
     private AuditLogService auditLogService;
     @Mock
@@ -62,8 +62,9 @@ class ServiceCatalogServiceTest {
         assertEquals(ServiceRequestStatus.PENDING_APPROVAL, result.getStatus());
         assertNull(result.getTicketId());
         verify(ticketService, never()).create(any(Ticket.class), any(), any());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(9L), eq("SERVICE_APPROVAL_REQUIRED"),
-                contains("待审批"), contains("开通研发环境"), contains("SERVICE_APPROVAL_REQUIRED:31"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(9L), eq(null), eq("SERVICE_APPROVAL_REQUIRED"),
+                contains("待审批"), contains("开通研发环境"), contains("SERVICE_APPROVAL_REQUIRED:31"),
+                eq("SERVICE_REQUEST"), eq(31L));
     }
 
     @Test
@@ -85,8 +86,9 @@ class ServiceCatalogServiceTest {
         assertEquals(ServiceRequestStatus.APPROVED, result.getStatus());
         assertEquals(44L, result.getTicketId());
         verify(requestMapper).updateById(result);
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(7L), eq("SERVICE_REQUEST_RESULT"),
-                contains("已受理"), contains("OPF-TEST0001"), eq("SERVICE_REQUEST_AUTO_APPROVED:32"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(7L), eq(null), eq("SERVICE_REQUEST_RESULT"),
+                contains("已受理"), contains("OPF-TEST0001"), eq("SERVICE_REQUEST_AUTO_APPROVED:32"),
+                eq("SERVICE_REQUEST"), eq(32L));
     }
 
     @Test

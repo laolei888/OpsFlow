@@ -8,7 +8,7 @@ import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentMapper;
 import com.opsflow.incident.IncidentSeverity;
 import com.opsflow.incident.IncidentStatus;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -34,7 +34,7 @@ class PostmortemServiceTest {
     @Mock private IncidentPostmortemActionMapper actionMapper;
     @Mock private IncidentMapper incidentMapper;
     @Mock private AuthService authService;
-    @Mock private NotificationService notificationService;
+    @Mock private AsyncNotificationPublisher notificationPublisher;
     @Mock private AuditLogService auditLogService;
 
     @InjectMocks private PostmortemService service;
@@ -85,8 +85,9 @@ class PostmortemServiceTest {
 
         assertEquals(PostmortemStatus.IN_REVIEW, result.getStatus());
         assertNotNull(result.getSubmittedAt());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(9L), eq("POSTMORTEM_REVIEW_REQUIRED"),
-                eq("重大事件复盘待评审"), contains("已提交"), contains("POSTMORTEM_REVIEW_REQUIRED:81"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(9L), eq(null),
+                eq("POSTMORTEM_REVIEW_REQUIRED"), eq("重大事件复盘待评审"), contains("已提交"),
+                contains("POSTMORTEM_REVIEW_REQUIRED:81"), eq("POSTMORTEM"), eq(81L));
         verify(auditLogService).record(eq(3L), eq(7L), eq("POSTMORTEM"), eq(81L),
                 eq("POSTMORTEM_SUBMITTED"), any(), eq(result), contains("提交"));
     }
@@ -101,8 +102,9 @@ class PostmortemServiceTest {
 
         assertEquals(PostmortemStatus.DRAFT, result.getStatus());
         assertEquals("根因证据不足", result.getRejectedReason());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(7L), eq("POSTMORTEM_REJECTED"),
-                eq("重大事件复盘需修改"), contains("根因证据不足"), contains("POSTMORTEM_REJECTED:81"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(7L), eq(null), eq("POSTMORTEM_REJECTED"),
+                eq("重大事件复盘需修改"), contains("根因证据不足"), contains("POSTMORTEM_REJECTED:81"),
+                eq("POSTMORTEM"), eq(81L));
     }
 
     @Test

@@ -7,7 +7,7 @@ import com.opsflow.auth.StaffSummary;
 import com.opsflow.cmdb.CmdbAsset;
 import com.opsflow.cmdb.CmdbAssetMapper;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.TicketService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -39,7 +39,7 @@ public class ChangeService {
     private final CmdbAssetMapper assetMapper;
     private final TicketService ticketService;
     private final AuthService authService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
 
     public List<ChangeRequest> list(Long tenantId, Long requesterId, ChangeStatus status,
@@ -395,15 +395,18 @@ public class ChangeService {
         List<StaffSummary> staff = authService.staffMembers(change.getTenantId());
         for (StaffSummary member : staff) {
             if (member.roles().contains("ADMIN")) {
-                notificationService.notifyIfAbsent(change.getTenantId(), member.id(), "CHANGE_APPROVAL_REQUIRED",
-                        "新的变更待审批", "变更「" + change.getTitle() + "」等待风险审批。",
-                        "CHANGE_APPROVAL_REQUIRED:" + change.getId());
+                notificationPublisher.enqueue(change.getTenantId(), member.id(), null,
+                        "CHANGE_APPROVAL_REQUIRED", "新的变更待审批",
+                        "变更「" + change.getTitle() + "」等待风险审批。",
+                        "CHANGE_APPROVAL_REQUIRED:" + change.getId(),
+                        "CHANGE_REQUEST", change.getId());
             }
         }
     }
 
     private void notifyRequester(ChangeRequest change, String type, String title, String content, String dedupeKey) {
-        notificationService.notifyIfAbsent(change.getTenantId(), change.getRequesterId(), type, title, content, dedupeKey);
+        notificationPublisher.enqueue(change.getTenantId(), change.getRequesterId(), null,
+                type, title, content, dedupeKey, "CHANGE_REQUEST", change.getId());
     }
 
     private ChangeRequest lock(Long id, Long tenantId) {

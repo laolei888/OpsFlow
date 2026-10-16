@@ -136,6 +136,26 @@ public class AsyncMessageOutboxService {
                 oldest == null ? null : oldest.getCreatedAt());
     }
 
+    public OutboxDiagnostic diagnostic(Long id, Long tenantId) {
+        AsyncMessageOutboxEvent event = outboxMapper.selectOne(
+                new LambdaQueryWrapper<AsyncMessageOutboxEvent>()
+                        .eq(AsyncMessageOutboxEvent::getId, id)
+                        .eq(AsyncMessageOutboxEvent::getTenantId, tenantId));
+        if (event == null) throw new BusinessException("异步消息不存在");
+        String category = failureCategory(event);
+        boolean retryable = event.getStatus() == AsyncMessageOutboxStatus.FAILED
+                || event.getStatus() == AsyncMessageOutboxStatus.DEAD;
+        int attempts = event.getAttemptCount() == null ? 0 : event.getAttemptCount();
+        int automaticAttemptsRemaining = event.getStatus() == AsyncMessageOutboxStatus.FAILED
+                ? Math.max(0, MAX_ATTEMPTS - attempts) : 0;
+        long ageSeconds = event.getCreatedAt() == null ? 0
+                : Math.max(0, Duration.between(event.getCreatedAt(), LocalDateTime.now()).toSeconds());
+        return new OutboxDiagnostic(toView(event), event.getRoutingKey(),
+                truncate(event.getPayloadJson() == null ? "" : event.getPayloadJson(), 4000),
+                category, recommendation(category, event.getStatus()), retryable,
+                automaticAttemptsRemaining, ageSeconds);
+    }
+
     @Transactional
     public AsyncMessageOutboxEvent retry(Long id, Long tenantId, Long actorId) {
         AsyncMessageOutboxEvent event = outboxMapper.selectForUpdateInTenant(id, tenantId);
@@ -286,6 +306,38 @@ public class AsyncMessageOutboxService {
         return message == null || message.isBlank() ? "无错误详情" : message;
     }
 
+    private String failureCategory(AsyncMessageOutboxEvent event) {
+        if (event.getStatus() == AsyncMessageOutboxStatus.PUBLISHED) return "DELIVERED";
+        if (event.getStatus() == AsyncMessageOutboxStatus.PENDING) return "QUEUED";
+        if (event.getStatus() == AsyncMessageOutboxStatus.PROCESSING) return "PUBLISHING";
+        String error = event.getLastError() == null ? "" : event.getLastError().toLowerCase(Locale.ROOT);
+        if (error.contains("unroutable") || error.contains("no_route") || error.contains("returned")) {
+            return "ROUTING";
+        }
+        if (error.contains("timeout") || error.contains("timed out")) return "BROKER_TIMEOUT";
+        if (error.contains("connection") || error.contains("connect") || error.contains("unavailable")
+                || error.contains("refused")) return "BROKER_UNAVAILABLE";
+        if (error.contains("rejected") || error.contains("nack")) return "BROKER_REJECTED";
+        if (error.contains("serializ") || error.contains("json") || error.contains("payload")) return "PAYLOAD";
+        return "PUBLISH_FAILURE";
+    }
+
+    private String recommendation(String category, AsyncMessageOutboxStatus status) {
+        return switch (category) {
+            case "DELIVERED" -> "消息已获得 Broker Confirm，无需处理。";
+            case "QUEUED" -> "消息正在等待调度器发布，请观察下一次派发。";
+            case "PUBLISHING" -> "消息已被工作线程领取；超过处理租约后会自动恢复。";
+            case "ROUTING" -> "检查 RabbitMQ 交换机、绑定键和消费者队列后再执行重放。";
+            case "BROKER_TIMEOUT" -> "检查 RabbitMQ 延迟与网络状况；恢复后可安全重放。";
+            case "BROKER_UNAVAILABLE" -> "确认 RabbitMQ 服务和连接配置恢复后再执行重放。";
+            case "BROKER_REJECTED" -> "检查 Broker Confirm 拒绝原因、权限与资源限制后重放。";
+            case "PAYLOAD" -> "检查消息负载格式和字段长度；修复生产逻辑后再重放。";
+            default -> status == AsyncMessageOutboxStatus.DEAD
+                    ? "消息已耗尽自动重试，请结合错误详情排查后手动重放。"
+                    : "消息会按指数退避自动重试，也可在问题恢复后手动重放。";
+        };
+    }
+
     private String truncate(String value, int maxLength) {
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
@@ -295,6 +347,10 @@ public class AsyncMessageOutboxService {
 
     public record OutboxSummary(long pending, long processing, long failed, long dead,
                                 long published, LocalDateTime oldestPendingAt) { }
+
+    public record OutboxDiagnostic(OutboxEventView event, String routingKey, String payloadJson,
+                                   String failureCategory, String recommendation, boolean retryable,
+                                   int automaticAttemptsRemaining, long ageSeconds) { }
 
     public record OutboxEventView(Long id, String messageId, String eventType,
                                   String notificationType, String title, String aggregateType,

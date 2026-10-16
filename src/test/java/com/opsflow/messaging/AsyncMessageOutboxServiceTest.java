@@ -103,6 +103,21 @@ class AsyncMessageOutboxServiceTest {
         assertThat(second.getStatus()).isEqualTo(AsyncMessageOutboxStatus.PENDING);
     }
 
+    @Test
+    void diagnosticExplainsDeadRoutingFailure() {
+        AsyncMessageOutboxEvent event = event(AsyncMessageOutboxStatus.DEAD);
+        event.setAttemptCount(8);
+        event.setLastError("IllegalStateException: RabbitMQ returned unroutable message: NO_ROUTE");
+        when(outboxMapper.selectOne(any())).thenReturn(event);
+
+        AsyncMessageOutboxService.OutboxDiagnostic diagnostic = service.diagnostic(31L, 3L);
+
+        assertThat(diagnostic.failureCategory()).isEqualTo("ROUTING");
+        assertThat(diagnostic.retryable()).isTrue();
+        assertThat(diagnostic.automaticAttemptsRemaining()).isZero();
+        assertThat(diagnostic.recommendation()).contains("绑定键");
+    }
+
     private void confirmPublish(boolean acknowledged, String reason) {
         doAnswer(invocation -> {
             CorrelationData correlation = invocation.getArgument(4);

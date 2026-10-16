@@ -7,7 +7,7 @@ import com.opsflow.auth.StaffSummary;
 import com.opsflow.change.ChangeRequest;
 import com.opsflow.change.ChangeRequestMapper;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketMapper;
 import com.opsflow.ticket.TicketService;
@@ -43,7 +43,7 @@ public class ProblemService {
     private final ChangeRequestMapper changeMapper;
     private final TicketService ticketService;
     private final AuthService authService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
 
     public List<Problem> list(Long tenantId, Long requesterId, ProblemStatus status,
@@ -425,15 +425,17 @@ public class ProblemService {
     private void notifyApprovers(Problem problem) {
         for (StaffSummary member : authService.staffMembers(problem.getTenantId())) {
             if (member.roles().contains("ADMIN")) {
-                notificationService.notifyIfAbsent(problem.getTenantId(), member.id(), "PROBLEM_CREATED",
-                        "新的问题单", "问题「" + problem.getTitle() + "」需要进行根因分析。",
-                        "PROBLEM_CREATED:" + problem.getId());
+                notificationPublisher.enqueue(problem.getTenantId(), member.id(), null,
+                        "PROBLEM_CREATED", "新的问题单",
+                        "问题「" + problem.getTitle() + "」需要进行根因分析。",
+                        "PROBLEM_CREATED:" + problem.getId(), "PROBLEM", problem.getId());
             }
         }
     }
 
     private void notifyRequester(Problem problem, String type, String title, String content, String dedupeKey) {
-        notificationService.notifyIfAbsent(problem.getTenantId(), problem.getRequesterId(), type, title, content, dedupeKey);
+        notificationPublisher.enqueue(problem.getTenantId(), problem.getRequesterId(), null,
+                type, title, content, dedupeKey, "PROBLEM", problem.getId());
     }
 
     private Problem lock(Long id, Long tenantId) {

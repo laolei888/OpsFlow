@@ -7,7 +7,7 @@ import com.opsflow.common.BusinessException;
 import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentMapper;
 import com.opsflow.incident.IncidentStatus;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -33,7 +33,7 @@ public class PostmortemService {
     private final IncidentPostmortemActionMapper actionMapper;
     private final IncidentMapper incidentMapper;
     private final AuthService authService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
 
     public List<PostmortemListItem> list(Long tenantId, PostmortemStatus status, String keyword, Integer limit) {
@@ -246,9 +246,11 @@ public class PostmortemService {
         postmortem.setRejectedReason(null);
         postmortem.setUpdatedAt(now);
         postmortemMapper.updateById(postmortem);
-        notificationService.notifyIfAbsent(tenantId, postmortem.getReviewerId(), "POSTMORTEM_REVIEW_REQUIRED",
-                "重大事件复盘待评审", "「" + postmortem.getTitle() + "」已提交，请完成复盘评审。",
-                "POSTMORTEM_REVIEW_REQUIRED:" + postmortem.getId() + ":" + postmortem.getSubmittedAt());
+        notificationPublisher.enqueue(tenantId, postmortem.getReviewerId(), null,
+                "POSTMORTEM_REVIEW_REQUIRED", "重大事件复盘待评审",
+                "「" + postmortem.getTitle() + "」已提交，请完成复盘评审。",
+                "POSTMORTEM_REVIEW_REQUIRED:" + postmortem.getId() + ":" + postmortem.getSubmittedAt(),
+                "POSTMORTEM", postmortem.getId());
         auditLogService.record(tenantId, actorId, "POSTMORTEM", id, "POSTMORTEM_SUBMITTED",
                 before, postmortem, "提交重大事件复盘评审");
         return postmortem;
@@ -381,8 +383,9 @@ public class PostmortemService {
     }
 
     private void notifyFacilitator(IncidentPostmortem postmortem, String type, String title, String content) {
-        notificationService.notifyIfAbsent(postmortem.getTenantId(), postmortem.getFacilitatorId(), type,
-                title, content, type + ":" + postmortem.getId() + ":" + postmortem.getUpdatedAt());
+        notificationPublisher.enqueue(postmortem.getTenantId(), postmortem.getFacilitatorId(), null,
+                type, title, content, type + ":" + postmortem.getId() + ":" + postmortem.getUpdatedAt(),
+                "POSTMORTEM", postmortem.getId());
     }
 
     private boolean isOverdue(IncidentPostmortemAction action, LocalDateTime now) {

@@ -5,7 +5,7 @@ import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.cmdb.CmdbAssetService;
 import com.opsflow.incident.IncidentService;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.oncall.OnCallRecipientResolver;
 import com.opsflow.runbook.RunbookService;
 import com.opsflow.ticket.Ticket;
@@ -42,7 +42,7 @@ class AlertServiceTest {
     @Mock private CmdbAssetService cmdbAssetService;
     @Mock private TicketService ticketService;
     @Mock private IncidentService incidentService;
-    @Mock private NotificationService notificationService;
+    @Mock private AsyncNotificationPublisher notificationPublisher;
     @Mock private OnCallRecipientResolver onCallRecipientResolver;
     @Mock private RunbookService runbookService;
     @Mock private AuthService authService;
@@ -73,8 +73,9 @@ class AlertServiceTest {
         assertFalse(result.aggregated());
         assertEquals(AlertStatus.FIRING, result.alert().getStatus());
         assertEquals(AlertRuleAction.NOTIFY_ONCALL, result.appliedAction());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(8L), eq("MONITORING_ALERT"),
-                contains("CRITICAL"), contains("订单 API"), eq("MONITORING_ALERT:91:1:8"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(8L), eq(null), eq("MONITORING_ALERT"),
+                contains("CRITICAL"), contains("订单 API"), eq("MONITORING_ALERT:91:1:8"),
+                eq("MONITORING_ALERT"), eq(91L));
         verify(configService).markReceived(eq(source), any(LocalDateTime.class));
     }
 
@@ -93,7 +94,7 @@ class AlertServiceTest {
         assertTrue(result.aggregated());
         assertEquals(5, result.alert().getOccurrenceCount());
         verify(configService, never()).matchRule(any(), any(), any());
-        verify(notificationService, never()).notifyIfAbsent(any(), any(), any(), any(), any(), any());
+        verify(notificationPublisher, never()).enqueue(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(eventMapper).insert(any(AlertEvent.class));
     }
 

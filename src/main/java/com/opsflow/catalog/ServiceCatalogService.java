@@ -5,7 +5,7 @@ import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.auth.StaffSummary;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketPriority;
 import com.opsflow.ticket.TicketService;
@@ -28,7 +28,7 @@ public class ServiceCatalogService {
     private final ServiceCatalogItemMapper itemMapper;
     private final ServiceRequestMapper requestMapper;
     private final TicketService ticketService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
     private final AuthService authService;
 
@@ -214,16 +214,18 @@ public class ServiceCatalogService {
                 .filter(staff -> staff.roles().contains("ADMIN"))
                 .toList();
         for (StaffSummary admin : admins) {
-            notificationService.notifyIfAbsent(request.getTenantId(), admin.id(), "SERVICE_APPROVAL_REQUIRED",
-                    "待审批服务申请 · " + request.getItemName(),
+            notificationPublisher.enqueue(request.getTenantId(), admin.id(), null,
+                    "SERVICE_APPROVAL_REQUIRED", "待审批服务申请 · " + request.getItemName(),
                     request.getRequestNo() + "：" + request.getSummary(),
-                    "SERVICE_APPROVAL_REQUIRED:" + request.getId() + ":" + admin.id());
+                    "SERVICE_APPROVAL_REQUIRED:" + request.getId() + ":" + admin.id(),
+                    "SERVICE_REQUEST", request.getId());
         }
     }
 
     private void notifyRequester(ServiceRequest request, String title, String content, String event) {
-        notificationService.notifyIfAbsent(request.getTenantId(), request.getRequesterId(), "SERVICE_REQUEST_RESULT",
-                title, content, event + ":" + request.getId());
+        notificationPublisher.enqueue(request.getTenantId(), request.getRequesterId(), null,
+                "SERVICE_REQUEST_RESULT", title, content, event + ":" + request.getId(),
+                "SERVICE_REQUEST", request.getId());
     }
 
     private ServiceCatalogItem findItem(Long id, Long tenantId, boolean requireEnabled) {

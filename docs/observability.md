@@ -96,6 +96,10 @@ sum(rate(opsflow_messaging_consume_succeeded_total{job="opsflow"}[5m]))
 sum(rate(opsflow_messaging_consume_deduplicated_total{job="opsflow"}[5m]))
 ```
 
+管理员还可以在“异步消息”页面打开单条诊断，结合故障分类、Broker 路由键、幂等键、
+消息负载、自动重试余量和最近错误判断故障位于路由、连接、确认超时还是负载阶段；
+失败与死信事件支持在问题恢复后安全重放。
+
 常用 TraceQL：
 
 ```traceql

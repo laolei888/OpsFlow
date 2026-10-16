@@ -35,7 +35,7 @@ const stepForm = reactive({ stepNo: 1, delayMinutes: 0, targetType: 'ON_CALL', s
 const severityLabels = { SEV1: 'SEV1 · 极严重', SEV2: 'SEV2 · 高', SEV3: 'SEV3 · 中', SEV4: 'SEV4 · 低' }
 const targetLabels = { ON_CALL: '当前值班人', USER: '指定成员', ALL_STAFF: '全部客服' }
 const eventStatusLabels = { ACTIVE: '升级中', EXHAUSTED: '已完成升级', RESOLVED: '事件已解决', CANCELLED: '已停止' }
-const deliveryStatusLabels = { SENT: '已通知', SUPPRESSED: '已去重' }
+const deliveryStatusLabels = { SENT: '已入队', SUPPRESSED: '已去重' }
 
 const selectedSchedule = computed(() => schedules.value.find(item => String(item.id) === String(selectedScheduleId.value)) || null)
 const selectedPolicy = computed(() => policies.value.find(item => String(item.policy.id) === String(selectedPolicyId.value)) || null)

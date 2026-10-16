@@ -6,7 +6,7 @@ import com.opsflow.auth.AuthService;
 import com.opsflow.auth.StaffSummary;
 import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentSeverity;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +33,7 @@ public class OnCallEscalationService {
     private final OnCallEscalationDeliveryMapper deliveryMapper;
     private final OnCallRecipientResolver recipientResolver;
     private final AuthService authService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
 
     @Transactional
@@ -165,11 +165,12 @@ public class OnCallEscalationService {
         }
         int sent = 0;
         for (Long recipientId : recipients) {
-            boolean created = notificationService.notifyIfAbsent(event.getTenantId(), recipientId,
+            boolean created = notificationPublisher.enqueue(event.getTenantId(), recipientId, null,
                     "ONCALL_ESCALATION", "重大事件值班升级 · L" + step.getStepNo(),
                     "事件「" + event.getIncidentTitle() + "」(" + event.getIncidentNo() + ") 当前等级："
                             + event.getSeverity() + "，请立即响应。",
-                    "ONCALL_ESCALATION:" + event.getId() + ":" + step.getStepNo() + ":" + recipientId);
+                    "ONCALL_ESCALATION:" + event.getId() + ":" + step.getStepNo() + ":" + recipientId,
+                    "ONCALL_ESCALATION", event.getId());
             OnCallEscalationDelivery delivery = new OnCallEscalationDelivery();
             delivery.setTenantId(event.getTenantId());
             delivery.setEscalationEventId(event.getId());
@@ -177,7 +178,7 @@ public class OnCallEscalationService {
             delivery.setRecipientId(recipientId);
             delivery.setTargetType(step.getTargetType());
             delivery.setStatus(created ? OnCallEscalationDeliveryStatus.SENT : OnCallEscalationDeliveryStatus.SUPPRESSED);
-            delivery.setDetail(created ? "已写入通知中心" : "命中通知去重规则");
+            delivery.setDetail(created ? "已进入可靠消息队列" : "命中消息去重规则");
             delivery.setCreatedAt(now);
             deliveryMapper.insert(delivery);
             if (created) sent++;

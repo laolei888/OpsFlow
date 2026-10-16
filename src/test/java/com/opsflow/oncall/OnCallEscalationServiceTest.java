@@ -5,7 +5,7 @@ import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentSeverity;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -33,7 +33,7 @@ class OnCallEscalationServiceTest {
     @Mock private OnCallEscalationDeliveryMapper deliveryMapper;
     @Mock private OnCallRecipientResolver recipientResolver;
     @Mock private AuthService authService;
-    @Mock private NotificationService notificationService;
+    @Mock private AsyncNotificationPublisher notificationPublisher;
     @Mock private AuditLogService auditLogService;
 
     @InjectMocks private OnCallEscalationService service;
@@ -77,8 +77,9 @@ class OnCallEscalationServiceTest {
         when(eventMapper.selectForUpdate(71L)).thenReturn(event);
         when(stepMapper.selectList(any(Wrapper.class))).thenReturn(List.of(step(1, 0)));
         when(recipientResolver.activeRecipients(eq(3L), eq(11L), any())).thenReturn(Set.of(8L));
-        when(notificationService.notifyIfAbsent(eq(3L), eq(8L), eq("ONCALL_ESCALATION"),
-                contains("L1"), contains("订单服务"), eq("ONCALL_ESCALATION:71:1:8"))).thenReturn(true);
+        when(notificationPublisher.enqueue(eq(3L), eq(8L), eq(null), eq("ONCALL_ESCALATION"),
+                contains("L1"), contains("订单服务"), eq("ONCALL_ESCALATION:71:1:8"),
+                eq("ONCALL_ESCALATION"), eq(71L))).thenReturn(true);
 
         service.dispatchDueEvents();
 

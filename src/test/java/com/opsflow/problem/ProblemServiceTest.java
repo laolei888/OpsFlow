@@ -7,7 +7,7 @@ import com.opsflow.auth.StaffSummary;
 import com.opsflow.change.ChangeRequest;
 import com.opsflow.change.ChangeRequestMapper;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketMapper;
 import com.opsflow.ticket.TicketService;
@@ -47,7 +47,7 @@ class ProblemServiceTest {
     @Mock
     private AuthService authService;
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher notificationPublisher;
     @Mock
     private AuditLogService auditLogService;
 
@@ -70,8 +70,9 @@ class ProblemServiceTest {
         assertEquals(ProblemStatus.KNOWN_ERROR, result.getStatus());
         assertEquals(Boolean.TRUE, result.getKnownError());
         verify(taskMapper, org.mockito.Mockito.times(2)).insert(any(ProblemTask.class));
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(9L), eq("PROBLEM_CREATED"),
-                contains("问题单"), contains("根因分析"), eq("PROBLEM_CREATED:41"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(9L), eq(null), eq("PROBLEM_CREATED"),
+                contains("问题单"), contains("根因分析"), eq("PROBLEM_CREATED:41"),
+                eq("PROBLEM"), eq(41L));
     }
 
     @Test

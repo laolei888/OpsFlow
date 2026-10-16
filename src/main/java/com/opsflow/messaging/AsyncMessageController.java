@@ -44,6 +44,13 @@ public class AsyncMessageController {
         return ApiResponse.ok(outboxService.summary(principal.tenantId()));
     }
 
+    @GetMapping("/{id}")
+    public ApiResponse<AsyncMessageOutboxService.OutboxDiagnostic> diagnostic(
+            @PathVariable Long id, @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(outboxService.diagnostic(id, principal.tenantId()));
+    }
+
     @PostMapping("/{id}/retry")
     public ApiResponse<AsyncMessageOutboxEvent> retry(
             @PathVariable Long id, @AuthenticationPrincipal AuthPrincipal principal) {
