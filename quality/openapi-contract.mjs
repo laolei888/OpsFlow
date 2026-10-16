@@ -33,7 +33,13 @@ const requiredOperations = [
   ['get', '/api/v1/admin/async-messages'],
   ['get', '/api/v1/admin/async-messages/summary'],
   ['get', '/api/v1/admin/async-messages/{id}'],
-  ['post', '/api/v1/admin/async-messages/retry']
+  ['post', '/api/v1/admin/async-messages/retry'],
+  ['get', '/api/v1/admin/async-messages/dead-letters'],
+  ['get', '/api/v1/admin/async-messages/dead-letters/summary'],
+  ['get', '/api/v1/admin/async-messages/dead-letters/{id}'],
+  ['post', '/api/v1/admin/async-messages/dead-letters/{id}/requeue'],
+  ['post', '/api/v1/admin/async-messages/dead-letters/{id}/discard'],
+  ['get', '/api/v1/admin/async-messages/dead-letters/export.csv']
 ]
 
 const publicOperations = [

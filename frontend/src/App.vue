@@ -304,7 +304,9 @@ Object.assign(auditLabels, {
   RUNBOOK_EXECUTION_STARTED: '发起运行手册处置', RUNBOOK_EXECUTION_STEP_UPDATED: '记录处置步骤证据',
   RUNBOOK_EXECUTION_COMPLETED: '完成运行手册处置', RUNBOOK_EXECUTION_FAILED: '标记运行手册处置失败',
   RUNBOOK_EXECUTION_CANCELLED: '取消运行手册处置',
-  RUNBOOK_ALERT_MATCHER_CREATED: '创建告警运行手册推荐规则', RUNBOOK_ALERT_MATCHER_UPDATED: '更新告警运行手册推荐规则'
+  RUNBOOK_ALERT_MATCHER_CREATED: '创建告警运行手册推荐规则', RUNBOOK_ALERT_MATCHER_UPDATED: '更新告警运行手册推荐规则',
+  ASYNC_MESSAGE_RETRY: '重放异步消息', DEAD_LETTER_REQUEUED: '重新入队死信消息',
+  DEAD_LETTER_DISCARDED: '作废死信消息', DEAD_LETTER_EXPORTED: '导出死信记录'
 })
 const auditActionOptions = [
   { value: 'CREATED', label: '创建工单' },
@@ -394,7 +396,11 @@ const auditActionOptions = [
   { value: 'ALERT_SUPPRESSED', label: '抑制监控告警' },
   { value: 'ALERT_REOPENED', label: '重新打开告警' },
   { value: 'ALERT_SEVERITY_ESCALATED', label: '告警严重度升级' },
-  { value: 'ALERT_RULE_APPLIED', label: '执行告警自动化规则' }
+  { value: 'ALERT_RULE_APPLIED', label: '执行告警自动化规则' },
+  { value: 'ASYNC_MESSAGE_RETRY', label: '重放异步消息' },
+  { value: 'DEAD_LETTER_REQUEUED', label: '重新入队死信消息' },
+  { value: 'DEAD_LETTER_DISCARDED', label: '作废死信消息' },
+  { value: 'DEAD_LETTER_EXPORTED', label: '导出死信记录' }
 ]
 const nextStatus = { OPEN: 'IN_PROGRESS', IN_PROGRESS: 'WAITING_CONFIRMATION', WAITING_CONFIRMATION: 'RESOLVED', RESOLVED: 'CLOSED' }
 function canAdvanceTicket(ticket) {
@@ -2661,7 +2667,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
 <CustomerSatisfactionCenter v-else-if="activeView === 'satisfaction'" :api="api" :is-staff="canBulkUpdate" />
 <OperationsWorkbench v-else-if="activeView === 'workbench'" :api="api" :is-admin="isAdmin" @navigate="activeView = $event" />
 <SupportGroupCenter v-else-if="activeView === 'supportGroups'" :api="api" :staff-members="staffMembers" :is-admin="isAdmin" />
-<AsyncMessageCenter v-else-if="activeView === 'messages'" :api="api" />
+<AsyncMessageCenter v-else-if="activeView === 'messages'" :api="api" :download-csv="downloadCsv" />
 <section v-else-if="activeView === 'tickets'" class="view-panel">
   <div class="section-toolbar">
     <div><p class="eyebrow">WORK QUEUE</p><h2>工作队列</h2></div>

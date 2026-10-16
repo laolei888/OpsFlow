@@ -12,10 +12,15 @@ public class AsyncMessagingMetrics {
     private final AtomicLong pending = new AtomicLong();
     private final AtomicLong failed = new AtomicLong();
     private final AtomicLong dead = new AtomicLong();
+    private final AtomicLong deadLetterQuarantined = new AtomicLong();
+    private final AtomicLong deadLetterRequeueing = new AtomicLong();
     private final Counter publishAcknowledged;
     private final Counter consumeSucceeded;
     private final Counter consumeDeduplicated;
     private final Counter consumeFailed;
+    private final Counter quarantineReceived;
+    private final Counter quarantineRequeued;
+    private final Counter quarantineDiscarded;
 
     public AsyncMessagingMetrics(MeterRegistry registry) {
         Gauge.builder("opsflow.messaging.outbox.pending", pending, AtomicLong::get)
@@ -26,6 +31,12 @@ public class AsyncMessagingMetrics {
                 .register(registry);
         Gauge.builder("opsflow.messaging.outbox.dead", dead, AtomicLong::get)
                 .description("Async messages exhausted after publish retries")
+                .register(registry);
+        Gauge.builder("opsflow.messaging.dead_letter.quarantined", deadLetterQuarantined, AtomicLong::get)
+                .description("Consumer dead letters held in the governance quarantine")
+                .register(registry);
+        Gauge.builder("opsflow.messaging.dead_letter.requeueing", deadLetterRequeueing, AtomicLong::get)
+                .description("Consumer dead letters currently being requeued")
                 .register(registry);
         publishAcknowledged = Counter.builder("opsflow.messaging.publish.acknowledged")
                 .description("Messages acknowledged by RabbitMQ")
@@ -38,6 +49,15 @@ public class AsyncMessagingMetrics {
                 .register(registry);
         consumeFailed = Counter.builder("opsflow.messaging.consume.failed")
                 .description("Message consumer failures before retry or dead-lettering")
+                .register(registry);
+        quarantineReceived = Counter.builder("opsflow.messaging.dead_letter.received")
+                .description("Messages archived from the RabbitMQ dead-letter queue")
+                .register(registry);
+        quarantineRequeued = Counter.builder("opsflow.messaging.dead_letter.requeued")
+                .description("Quarantined messages manually requeued")
+                .register(registry);
+        quarantineDiscarded = Counter.builder("opsflow.messaging.dead_letter.discarded")
+                .description("Quarantined messages manually discarded")
                 .register(registry);
     }
 
@@ -58,4 +78,13 @@ public class AsyncMessagingMetrics {
     public void consumeFailed() {
         consumeFailed.increment();
     }
+
+    public void updateDeadLetterBacklog(long quarantined, long requeueing) {
+        deadLetterQuarantined.set(quarantined);
+        deadLetterRequeueing.set(requeueing);
+    }
+
+    public void deadLetterQuarantined() { quarantineReceived.increment(); }
+    public void deadLetterRequeued() { quarantineRequeued.increment(); }
+    public void deadLetterDiscarded() { quarantineDiscarded.increment(); }
 }

@@ -94,11 +94,22 @@ sum(rabbitmq_queue_messages_ready{job="rabbitmq",queue="opsflow.notifications.de
 # 消息消费和幂等去重速率
 sum(rate(opsflow_messaging_consume_succeeded_total{job="opsflow"}[5m]))
 sum(rate(opsflow_messaging_consume_deduplicated_total{job="opsflow"}[5m]))
+
+# 已从 Broker DLQ 归档、仍待人工处置的隔离消息
+opsflow_messaging_dead_letter_quarantined{job="opsflow"}
+
+# 人工重新入队与作废速率
+sum(rate(opsflow_messaging_dead_letter_requeued_total{job="opsflow"}[5m]))
+sum(rate(opsflow_messaging_dead_letter_discarded_total{job="opsflow"}[5m]))
 ```
 
 管理员还可以在“异步消息”页面打开单条诊断，结合故障分类、Broker 路由键、幂等键、
 消息负载、自动重试余量和最近错误判断故障位于路由、连接、确认超时还是负载阶段；
 失败与死信事件支持在问题恢复后安全重放。
+
+“死信治理”视图对应消费阶段的 RabbitMQ DLQ。专用消费者会在数据库事务中归档消息正文、
+`x-death` 头和租户信息，方法成功返回后 Broker 才确认消息；数据库异常会触发重新入队。
+重新投递使用 Publisher Confirm，未确认或无路由时记录恢复为 `QUARANTINED`，管理员可查看错误后再次处置。
 
 常用 TraceQL：
 

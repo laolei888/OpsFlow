@@ -158,6 +158,7 @@ opsflow:
     initial-delay-ms: ${OPSFLOW_MESSAGING_INITIAL_DELAY_MS:10000}
     publish-confirm-timeout: ${OPSFLOW_MESSAGING_CONFIRM_TIMEOUT:5s}
     consumer-concurrency: ${OPSFLOW_MESSAGING_CONSUMER_CONCURRENCY:2}
+    dead-letter-concurrency: ${OPSFLOW_MESSAGING_DEAD_LETTER_CONCURRENCY:1}
   storage:
     upload-dir: ${OPSFLOW_UPLOAD_DIR:/app/uploads}
     max-file-size: ${OPSFLOW_MAX_UPLOAD_BYTES:10485760}

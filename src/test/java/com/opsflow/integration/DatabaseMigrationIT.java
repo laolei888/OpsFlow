@@ -42,6 +42,7 @@ class DatabaseMigrationIT {
         try (Connection connection = connection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("DELETE FROM ticket_satisfaction_responses");
+            statement.executeUpdate("DELETE FROM async_dead_letter_messages");
             statement.executeUpdate("DELETE FROM async_message_outbox");
         }
     }
@@ -78,10 +79,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV39() {
+    void appliesEveryMigrationThroughV40() {
         assertNotNull(flyway.info().current());
-        assertEquals("39", flyway.info().current().getVersion().getVersion());
-        assertEquals(39, flyway.info().applied().length);
+        assertEquals("40", flyway.info().current().getVersion().getVersion());
+        assertEquals(40, flyway.info().applied().length);
     }
 
     @Test
@@ -129,6 +130,14 @@ class DatabaseMigrationIT {
         insertAsyncMessage(1L, 8L, "message-0000000000000000000000000003", "REPORT:9");
     }
 
+    @Test
+    void enforcesOneDeadLetterRecordPerTenantAndMessage() throws SQLException {
+        insertDeadLetter(1L, "message-0000000000000000000000000001");
+        assertThrows(SQLException.class,
+                () -> insertDeadLetter(1L, "message-0000000000000000000000000001"));
+        insertDeadLetter(2L, "message-0000000000000000000000000001");
+    }
+
     private void insertResponse(Long tenantId, Long ticketId, Long requesterId,
                                 Long assigneeId, Long groupId, int rating) throws SQLException {
         String sql = """
@@ -165,6 +174,22 @@ class DatabaseMigrationIT {
             statement.setLong(2, recipientId);
             statement.setString(3, messageId);
             statement.setString(4, dedupeKey);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertDeadLetter(Long tenantId, String messageId) throws SQLException {
+        String sql = """
+                INSERT INTO async_dead_letter_messages
+                    (tenant_id, message_id, source_queue, original_routing_key, dead_letter_reason,
+                     payload_json, status, quarantined_at, updated_at)
+                VALUES (?, ?, 'opsflow.notifications.v1', 'notification.requested.v1', 'rejected',
+                        '{}', 'QUARANTINED', NOW(), NOW())
+                """;
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, tenantId);
+            statement.setString(2, messageId);
             statement.executeUpdate();
         }
     }
