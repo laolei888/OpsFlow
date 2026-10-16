@@ -7,7 +7,7 @@ import com.opsflow.auth.StaffSummary;
 import com.opsflow.cmdb.CmdbAsset;
 import com.opsflow.cmdb.CmdbAssetMapper;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.oncall.OnCallEscalationService;
 import com.opsflow.postmortem.IncidentPostmortem;
 import com.opsflow.postmortem.IncidentPostmortemMapper;
@@ -47,7 +47,7 @@ public class IncidentService {
     private final TicketMapper ticketMapper;
     private final CmdbAssetMapper assetMapper;
     private final AuthService authService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final OnCallEscalationService onCallEscalationService;
     private final AuditLogService auditLogService;
 
@@ -510,17 +510,21 @@ public class IncidentService {
     private void notifyDeclaration(Incident incident) {
         if (incident.getSeverity() != IncidentSeverity.SEV1 && incident.getSeverity() != IncidentSeverity.SEV2) return;
         for (StaffSummary member : authService.staffMembers(incident.getTenantId())) {
-            notificationService.notifyIfAbsent(incident.getTenantId(), member.id(), "INCIDENT_DECLARED",
-                    "重大事件已宣布", "「" + incident.getTitle() + "」当前等级：" + incident.getSeverity(),
-                    "INCIDENT_DECLARED:" + incident.getId() + ":" + member.id());
+            notificationPublisher.enqueue(incident.getTenantId(), member.id(), null,
+                    "INCIDENT_DECLARED", "重大事件已宣布",
+                    "「" + incident.getTitle() + "」当前等级：" + incident.getSeverity(),
+                    "INCIDENT_DECLARED:" + incident.getId() + ":" + member.id(),
+                    "INCIDENT", incident.getId());
         }
     }
 
     private void notifyCommander(Incident incident, Long actorId, IncidentStatus target) {
         if (incident.getCommanderId() == null || incident.getCommanderId().equals(actorId)) return;
-        notificationService.notifyIfAbsent(incident.getTenantId(), incident.getCommanderId(), "INCIDENT_STATUS_CHANGED",
-                "重大事件状态已更新", "「" + incident.getTitle() + "」当前状态：" + target,
-                "INCIDENT_STATUS_CHANGED:" + incident.getId() + ":" + target);
+        notificationPublisher.enqueue(incident.getTenantId(), incident.getCommanderId(), null,
+                "INCIDENT_STATUS_CHANGED", "重大事件状态已更新",
+                "「" + incident.getTitle() + "」当前状态：" + target,
+                "INCIDENT_STATUS_CHANGED:" + incident.getId() + ":" + target,
+                "INCIDENT", incident.getId());
     }
 
     private String normalizeType(String raw, Set<String> allowed, String field, String fallback) {

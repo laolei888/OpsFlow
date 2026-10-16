@@ -3,7 +3,7 @@ package com.opsflow.automation;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.auth.AuthService;
 import com.opsflow.audit.AuditLogService;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.sla.SlaPolicyService;
 import com.opsflow.supportgroup.SupportGroup;
 import com.opsflow.supportgroup.SupportGroupMapper;
@@ -46,7 +46,7 @@ class AutomationRuleServiceTest {
     @Mock
     private SupportGroupMemberMapper supportGroupMemberMapper;
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher notificationPublisher;
 
     @InjectMocks
     private AutomationRuleService service;
@@ -141,8 +141,9 @@ class AutomationRuleServiceTest {
         assertEquals(21L, applied.ruleId());
         assertEquals(41L, ticket.getAssignmentGroupId());
         assertEquals(9L, ticket.getAssigneeId());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(9L), eq("AUTOMATION_GROUP_ROUTED"),
-                eq("新工单已自动分派"), any(), eq("AUTOMATION_GROUP_ROUTED:20:21"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(9L), eq(20L),
+                eq("AUTOMATION_GROUP_ROUTED"), eq("新工单已自动分派"), any(),
+                eq("AUTOMATION_GROUP_ROUTED:20:21:9"), eq("TICKET"), eq(20L));
     }
 
     @Test

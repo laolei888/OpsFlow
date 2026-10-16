@@ -16,7 +16,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -87,7 +90,9 @@ public class AsyncMessageOutboxService {
         return published;
     }
 
-    public List<OutboxEventView> list(Long tenantId, AsyncMessageOutboxStatus status, Integer limit) {
+    public List<OutboxEventView> list(Long tenantId, AsyncMessageOutboxStatus status,
+                                      String notificationType, String aggregateType,
+                                      String keyword, Integer limit) {
         int safeLimit = limit == null ? 100 : Math.max(1, Math.min(limit, 200));
         LambdaQueryWrapper<AsyncMessageOutboxEvent> query = new LambdaQueryWrapper<AsyncMessageOutboxEvent>()
                 .eq(AsyncMessageOutboxEvent::getTenantId, tenantId)
@@ -95,6 +100,20 @@ public class AsyncMessageOutboxService {
                 .orderByDesc(AsyncMessageOutboxEvent::getId)
                 .last("LIMIT " + safeLimit);
         if (status != null) query.eq(AsyncMessageOutboxEvent::getStatus, status);
+        if (notificationType != null && !notificationType.isBlank()) {
+            query.eq(AsyncMessageOutboxEvent::getNotificationType,
+                    notificationType.trim().toUpperCase(Locale.ROOT));
+        }
+        if (aggregateType != null && !aggregateType.isBlank()) {
+            query.eq(AsyncMessageOutboxEvent::getAggregateType,
+                    aggregateType.trim().toUpperCase(Locale.ROOT));
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String search = keyword.trim();
+            query.and(nested -> nested.like(AsyncMessageOutboxEvent::getMessageId, search)
+                    .or().like(AsyncMessageOutboxEvent::getTitle, search)
+                    .or().like(AsyncMessageOutboxEvent::getDedupeKey, search));
+        }
         return outboxMapper.selectList(query).stream().map(this::toView).toList();
     }
 
@@ -124,6 +143,10 @@ public class AsyncMessageOutboxService {
         if (event.getStatus() == AsyncMessageOutboxStatus.PUBLISHED) {
             throw new BusinessException("已发布的异步消息无需重试");
         }
+        if (event.getStatus() == AsyncMessageOutboxStatus.PENDING
+                || event.getStatus() == AsyncMessageOutboxStatus.PROCESSING) {
+            throw new BusinessException("消息正在等待处理，无需重复重试");
+        }
         LocalDateTime now = LocalDateTime.now();
         event.setStatus(AsyncMessageOutboxStatus.PENDING);
         event.setAttemptCount(0);
@@ -135,6 +158,21 @@ public class AsyncMessageOutboxService {
         auditLogService.record(tenantId, actorId, "ASYNC_MESSAGE", id, "ASYNC_MESSAGE_RETRY",
                 null, event, "手动重试异步消息 Outbox 事件");
         return event;
+    }
+
+    @Transactional
+    public int retryBatch(List<Long> ids, Long tenantId, Long actorId) {
+        if (ids == null || ids.isEmpty()) throw new BusinessException("至少选择一条失败消息");
+        Set<Long> distinctIds = new LinkedHashSet<>(ids);
+        if (distinctIds.size() > 100) throw new BusinessException("单次最多重试 100 条消息");
+        int retried = 0;
+        for (Long id : distinctIds) {
+            if (id == null) continue;
+            retry(id, tenantId, actorId);
+            retried++;
+        }
+        if (retried == 0) throw new BusinessException("至少选择一条有效消息");
+        return retried;
     }
 
     public int purgePublished(Integer retentionDays) {
@@ -229,6 +267,7 @@ public class AsyncMessageOutboxService {
 
     private OutboxEventView toView(AsyncMessageOutboxEvent event) {
         return new OutboxEventView(event.getId(), event.getMessageId(), event.getEventType(),
+                event.getNotificationType(), event.getTitle(),
                 event.getAggregateType(), event.getAggregateId(), event.getRecipientId(), event.getDedupeKey(),
                 event.getStatus(), event.getAttemptCount(), event.getNextAttemptAt(), event.getClaimedAt(),
                 event.getPublishedAt(), event.getLastError(), event.getCreatedAt(), event.getUpdatedAt());
@@ -257,7 +296,8 @@ public class AsyncMessageOutboxService {
     public record OutboxSummary(long pending, long processing, long failed, long dead,
                                 long published, LocalDateTime oldestPendingAt) { }
 
-    public record OutboxEventView(Long id, String messageId, String eventType, String aggregateType,
+    public record OutboxEventView(Long id, String messageId, String eventType,
+                                  String notificationType, String title, String aggregateType,
                                   Long aggregateId, Long recipientId, String dedupeKey,
                                   AsyncMessageOutboxStatus status, Integer attemptCount,
                                   LocalDateTime nextAttemptAt, LocalDateTime claimedAt,

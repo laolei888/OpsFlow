@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketMapper;
 import com.opsflow.ticket.TicketPriority;
@@ -35,7 +35,7 @@ class SupportGroupServiceTest {
     @Mock private SupportGroupMemberMapper memberMapper;
     @Mock private TicketMapper ticketMapper;
     @Mock private AuthService authService;
-    @Mock private NotificationService notificationService;
+    @Mock private AsyncNotificationPublisher notificationPublisher;
     @Mock private AuditLogService auditLogService;
 
     @InjectMocks private SupportGroupService service;
@@ -89,9 +89,10 @@ class SupportGroupServiceTest {
 
         assertEquals(41L, result.getAssignmentGroupId());
         assertNull(result.getAssigneeId());
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(9L), eq("TICKET_GROUP_ROUTED"),
-                eq("支持组收到新工单"), contains("应用支持组"), contains("TICKET_GROUP_ROUTED:71:41"));
-        verify(notificationService, never()).notifyIfAbsent(eq(3L), eq(7L), any(), any(), any(), any());
+        verify(notificationPublisher).enqueue(eq(3L), eq(9L), eq(71L), eq("TICKET_GROUP_ROUTED"),
+                eq("支持组收到新工单"), contains("应用支持组"), contains("TICKET_GROUP_ROUTED:71:41"),
+                eq("TICKET"), eq(71L));
+        verify(notificationPublisher, never()).enqueue(eq(3L), eq(7L), any(), any(), any(), any(), any(), any(), any());
         verify(auditLogService).record(eq(3L), eq(7L), eq("TICKET"), eq(71L),
                 eq("TICKET_GROUP_ROUTED"), any(), any(), contains("应用支持组"));
     }

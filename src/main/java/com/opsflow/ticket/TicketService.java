@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.automation.AutomationRuleService;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.sla.SlaPolicyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -32,7 +32,7 @@ public class TicketService {
     private final SlaPolicyService slaPolicyService;
     private final AutomationRuleService automationRuleService;
     private final TicketIdempotencyKeyMapper idempotencyKeyMapper;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
 
     public Page<Ticket> page(long page, long size, TicketStatus status, Long tenantId) {
         return page(page, size, status, null, null, false, null, null, tenantId, TicketSort.CREATED_DESC);
@@ -214,6 +214,7 @@ public class TicketService {
         auditLogService.record(tenantId, requesterId, "TICKET", ticket.getId(), "CREATED",
                 null, Map.of("status", ticket.getStatus().name(), "priority", ticket.getPriority().name(),
                         "dueAt", ticket.getDueAt().toString()), "创建工单");
+        queueTicketCreated(ticket);
         automationRuleService.applyOnCreate(ticket, requesterId);
         if (reservation != null) {
             reservation.setTicketId(ticket.getId());
@@ -333,6 +334,7 @@ public class TicketService {
             after.put("priority", ticket.getPriority() == null ? null : ticket.getPriority().name());
             auditLogService.record(tenantId, actorId, "TICKET", ticket.getId(), "BULK_UPDATED",
                     before, after, "批量更新工单属性");
+            if (statusChanged) queueStatusChanged(ticket, beforeStatus, targetStatus, actorId);
             if (statusChanged && targetStatus == TicketStatus.RESOLVED) {
                 requestSatisfaction(ticket);
             }
@@ -356,16 +358,17 @@ public class TicketService {
         auditLogService.record(tenantId, actorId, "TICKET", ticket.getId(), "STATUS_CHANGED",
                 Map.of("status", beforeStatus.name()), Map.of("status", target.name()),
                 "工单状态从 " + beforeStatus + " 流转到 " + target);
+        queueStatusChanged(ticket, beforeStatus, target, actorId);
         if (target == TicketStatus.RESOLVED) requestSatisfaction(ticket);
         return ticket;
     }
 
     private void requestSatisfaction(Ticket ticket) {
         if (ticket.getRequesterId() == null) return;
-        notificationService.notifyIfAbsent(ticket.getTenantId(), ticket.getRequesterId(), ticket.getId(),
+        notificationPublisher.enqueue(ticket.getTenantId(), ticket.getRequesterId(), ticket.getId(),
                 "SATISFACTION_REQUESTED", "工单已解决，欢迎评价",
                 "工单 " + ticket.getTicketNo() + " 已解决，请对本次服务进行评价。",
-                "SATISFACTION_REQUESTED:" + ticket.getId());
+                "SATISFACTION_REQUESTED:" + ticket.getId(), "TICKET", ticket.getId());
     }
 
     @Transactional
@@ -416,7 +419,31 @@ public class TicketService {
             throw new BusinessException("工单已被其他人更新，请刷新后重试");
         }
         recordAssigneeAudit(ticket, actorId, beforeAssigneeId, assigneeId, "ASSIGNED", "指派工单");
+        if (!assigneeId.equals(actorId)) {
+            notificationPublisher.enqueue(ticket.getTenantId(), assigneeId, ticket.getId(),
+                    "TICKET_ASSIGNED", "你收到一张新工单",
+                    "工单 " + ticket.getTicketNo() + " 已指派给你，请及时处理。",
+                    "TICKET_ASSIGNED:" + ticket.getId() + ":" + assigneeId + ":" + ticket.getUpdatedAt(),
+                    "TICKET", ticket.getId());
+        }
         return ticket;
+    }
+
+    private void queueTicketCreated(Ticket ticket) {
+        if (ticket.getRequesterId() == null) return;
+        notificationPublisher.enqueue(ticket.getTenantId(), ticket.getRequesterId(), ticket.getId(),
+                "TICKET_CREATED", "工单已成功创建",
+                "工单 " + ticket.getTicketNo() + " 已进入处理队列，我们会持续同步处理进展。",
+                "TICKET_CREATED:" + ticket.getId(), "TICKET", ticket.getId());
+    }
+
+    private void queueStatusChanged(Ticket ticket, TicketStatus before, TicketStatus target, Long actorId) {
+        if (ticket.getRequesterId() == null || ticket.getRequesterId().equals(actorId)) return;
+        notificationPublisher.enqueue(ticket.getTenantId(), ticket.getRequesterId(), ticket.getId(),
+                "TICKET_STATUS_CHANGED", "工单状态已更新",
+                "工单 " + ticket.getTicketNo() + " 已从 " + before + " 更新为 " + target + "。",
+                "TICKET_STATUS_CHANGED:" + ticket.getId() + ":" + target + ":" + ticket.getUpdatedAt(),
+                "TICKET", ticket.getId());
     }
 
     private void recordAssigneeAudit(Ticket ticket, Long actorId, Long beforeAssigneeId,

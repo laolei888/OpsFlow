@@ -36,6 +36,8 @@ class AsyncNotificationPublisherTest {
         assertThat(event.getTenantId()).isEqualTo(3L);
         assertThat(event.getRecipientId()).isEqualTo(7L);
         assertThat(event.getStatus()).isEqualTo(AsyncMessageOutboxStatus.PENDING);
+        assertThat(event.getNotificationType()).isEqualTo("REPORT_READY");
+        assertThat(event.getTitle()).isEqualTo("运营报表");
         assertThat(event.getRoutingKey()).isEqualTo(MessagingTopology.NOTIFICATION_ROUTING_KEY);
         assertThat(event.getMessageId()).hasSize(36);
         assertThat(event.getNextAttemptAt()).isNotNull();

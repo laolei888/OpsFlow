@@ -16,6 +16,8 @@ public class AsyncMessageOutboxEvent {
     private Long recipientId;
     private String messageId;
     private String eventType;
+    private String notificationType;
+    private String title;
     private String routingKey;
     private String aggregateType;
     private Long aggregateId;

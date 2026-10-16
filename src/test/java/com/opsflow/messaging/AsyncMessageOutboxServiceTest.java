@@ -88,6 +88,21 @@ class AsyncMessageOutboxServiceTest {
                 eq("ASYNC_MESSAGE_RETRY"), eq(null), eq(result), anyString());
     }
 
+    @Test
+    void administratorCanRequeueMultipleFailedMessages() {
+        AsyncMessageOutboxEvent first = event(AsyncMessageOutboxStatus.FAILED);
+        AsyncMessageOutboxEvent second = event(AsyncMessageOutboxStatus.DEAD);
+        second.setId(32L);
+        when(outboxMapper.selectForUpdateInTenant(31L, 3L)).thenReturn(first);
+        when(outboxMapper.selectForUpdateInTenant(32L, 3L)).thenReturn(second);
+
+        int retried = service.retryBatch(List.of(31L, 32L, 32L), 3L, 7L);
+
+        assertThat(retried).isEqualTo(2);
+        assertThat(first.getStatus()).isEqualTo(AsyncMessageOutboxStatus.PENDING);
+        assertThat(second.getStatus()).isEqualTo(AsyncMessageOutboxStatus.PENDING);
+    }
+
     private void confirmPublish(boolean acknowledged, String reason) {
         doAnswer(invocation -> {
             CorrelationData correlation = invocation.getArgument(4);
@@ -104,6 +119,8 @@ class AsyncMessageOutboxServiceTest {
         event.setRecipientId(7L);
         event.setMessageId("2a00ed6e-615d-4ee8-b34c-4c42cb661cab");
         event.setEventType("NOTIFICATION_REQUESTED");
+        event.setNotificationType("REPORT_READY");
+        event.setTitle("运营报表");
         event.setRoutingKey(MessagingTopology.NOTIFICATION_ROUTING_KEY);
         event.setAggregateType("REPORT_SUBSCRIPTION");
         event.setAggregateId(9L);

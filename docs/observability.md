@@ -20,6 +20,7 @@
     └─ OpsFlow Spring Boot
          ├─ Micrometer metrics ── /actuator/prometheus ── Prometheus
          ├─ message outbox ────── RabbitMQ confirm/consume ── notification + DLQ
+         │   └─ admin message center：筛选失败/死信、查看错误、单条或批量重放
          ├─ OpenTelemetry spans ── OTLP/HTTP ───────────── Tempo
          └─ correlated logs ────── shared log volume ───── Alloy ── Loki
                                                                │

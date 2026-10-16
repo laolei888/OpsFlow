@@ -30,7 +30,9 @@ const requiredOperations = [
   ['get', '/api/v1/status-page'],
   ['get', '/api/v1/satisfaction/my-surveys'],
   ['get', '/api/v1/admin/webhooks'],
-  ['get', '/api/v1/admin/async-messages/summary']
+  ['get', '/api/v1/admin/async-messages'],
+  ['get', '/api/v1/admin/async-messages/summary'],
+  ['post', '/api/v1/admin/async-messages/retry']
 ]
 
 const publicOperations = [

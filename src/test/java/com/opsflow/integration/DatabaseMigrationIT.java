@@ -78,10 +78,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV38() {
+    void appliesEveryMigrationThroughV39() {
         assertNotNull(flyway.info().current());
-        assertEquals("38", flyway.info().current().getVersion().getVersion());
-        assertEquals(38, flyway.info().applied().length);
+        assertEquals("39", flyway.info().current().getVersion().getVersion());
+        assertEquals(39, flyway.info().applied().length);
     }
 
     @Test

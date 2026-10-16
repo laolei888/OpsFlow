@@ -5,7 +5,7 @@ import com.opsflow.audit.AuditLogService;
 import com.opsflow.auth.AuthService;
 import com.opsflow.auth.StaffSummary;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketMapper;
 import com.opsflow.ticket.TicketPriority;
@@ -37,7 +37,7 @@ public class SupportGroupService {
     private final SupportGroupMemberMapper memberMapper;
     private final TicketMapper ticketMapper;
     private final AuthService authService;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
 
     public List<GroupSummary> list(Long tenantId, Boolean enabled, String keyword) {
@@ -238,9 +238,11 @@ public class SupportGroupService {
         List<SupportGroupMember> recipients = members(groupId, tenantId);
         for (SupportGroupMember member : recipients) {
             if (member.getUserId().equals(actorId)) continue;
-            notificationService.notifyIfAbsent(tenantId, member.getUserId(), "TICKET_GROUP_ROUTED",
-                    "支持组收到新工单", "工单 " + ticket.getTicketNo() + " 已进入「" + group.getName() + "」队列。",
-                    "TICKET_GROUP_ROUTED:" + ticketId + ":" + groupId + ":" + now);
+            notificationPublisher.enqueue(tenantId, member.getUserId(), ticketId,
+                    "TICKET_GROUP_ROUTED", "支持组收到新工单",
+                    "工单 " + ticket.getTicketNo() + " 已进入「" + group.getName() + "」队列。",
+                    "TICKET_GROUP_ROUTED:" + ticketId + ":" + groupId + ":" + now + ":" + member.getUserId(),
+                    "TICKET", ticketId);
         }
         auditLogService.record(tenantId, actorId, "TICKET", ticketId,
                 "TICKET_GROUP_ROUTED", before, ticketAssignment(ticket),

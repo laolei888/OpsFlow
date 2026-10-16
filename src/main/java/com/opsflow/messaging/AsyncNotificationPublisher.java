@@ -57,6 +57,8 @@ public class AsyncNotificationPublisher {
         event.setRecipientId(recipientId);
         event.setMessageId(messageId);
         event.setEventType("NOTIFICATION_REQUESTED");
+        event.setNotificationType(type);
+        event.setTitle(title);
         event.setRoutingKey(MessagingTopology.NOTIFICATION_ROUTING_KEY);
         event.setAggregateType(blankToNull(aggregateType));
         event.setAggregateId(aggregateId);

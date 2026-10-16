@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.auth.AuthService;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.sla.SlaPolicyService;
 import com.opsflow.supportgroup.SupportGroup;
 import com.opsflow.supportgroup.SupportGroupMapper;
@@ -36,7 +36,7 @@ public class AutomationRuleService {
     private final SlaPolicyService slaPolicyService;
     private final SupportGroupMapper supportGroupMapper;
     private final SupportGroupMemberMapper supportGroupMemberMapper;
-    private final NotificationService notificationService;
+    private final AsyncNotificationPublisher notificationPublisher;
 
     public List<AutomationRuleView> list(Long tenantId) {
         return ruleMapper.selectList(new LambdaQueryWrapper<AutomationRule>()
@@ -294,8 +294,10 @@ public class AutomationRuleService {
                 + (routing.assigneeId() == null ? "，等待组内成员领取。" : "，请及时处理。");
         for (Long recipientId : recipients) {
             if (recipientId.equals(actorId)) continue;
-            notificationService.notifyIfAbsent(ticket.getTenantId(), recipientId, "AUTOMATION_GROUP_ROUTED",
-                    title, content, "AUTOMATION_GROUP_ROUTED:" + ticket.getId() + ":" + rule.getId());
+            notificationPublisher.enqueue(ticket.getTenantId(), recipientId, ticket.getId(),
+                    "AUTOMATION_GROUP_ROUTED", title, content,
+                    "AUTOMATION_GROUP_ROUTED:" + ticket.getId() + ":" + rule.getId() + ":" + recipientId,
+                    "TICKET", ticket.getId());
         }
     }
 

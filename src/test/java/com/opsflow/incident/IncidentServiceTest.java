@@ -6,7 +6,7 @@ import com.opsflow.auth.AuthService;
 import com.opsflow.auth.StaffSummary;
 import com.opsflow.cmdb.CmdbAssetMapper;
 import com.opsflow.common.BusinessException;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.oncall.OnCallEscalationService;
 import com.opsflow.postmortem.IncidentPostmortemMapper;
 import com.opsflow.ticket.Ticket;
@@ -51,7 +51,7 @@ class IncidentServiceTest {
     @Mock
     private AuthService authService;
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher notificationPublisher;
     @Mock
     private AuditLogService auditLogService;
     @Mock
@@ -79,8 +79,9 @@ class IncidentServiceTest {
         assertNotNull(result.getStartedAt());
         verify(updateMapper).insert(any(IncidentUpdate.class));
         verify(taskMapper, times(2)).insert(any(IncidentTask.class));
-        verify(notificationService).notifyIfAbsent(eq(3L), eq(8L), eq("INCIDENT_DECLARED"),
-                eq("重大事件已宣布"), contains("SEV1"), eq("INCIDENT_DECLARED:61:8"));
+        verify(notificationPublisher).enqueue(eq(3L), eq(8L), eq(null), eq("INCIDENT_DECLARED"),
+                eq("重大事件已宣布"), contains("SEV1"), eq("INCIDENT_DECLARED:61:8"),
+                eq("INCIDENT"), eq(61L));
         verify(auditLogService).record(eq(3L), eq(7L), eq("INCIDENT"), eq(61L),
                 eq("INCIDENT_DECLARED"), eq(null), eq(result), contains("宣布"));
     }

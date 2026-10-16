@@ -3,7 +3,7 @@ package com.opsflow.ticket;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.automation.AutomationRuleService;
-import com.opsflow.notification.NotificationService;
+import com.opsflow.messaging.AsyncNotificationPublisher;
 import com.opsflow.sla.SlaPolicyService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,7 +41,7 @@ class TicketServiceTest {
     private TicketIdempotencyKeyMapper idempotencyKeyMapper;
 
     @Mock
-    private NotificationService notificationService;
+    private AsyncNotificationPublisher notificationPublisher;
 
     @InjectMocks
     private TicketService ticketService;
@@ -193,10 +193,10 @@ class TicketServiceTest {
         Ticket resolved = ticketService.transition(1L, TicketStatus.RESOLVED, 9L, 3L);
 
         assertEquals(TicketStatus.RESOLVED, resolved.getStatus());
-        verify(notificationService).notifyIfAbsent(3L, 7L, 1L,
+        verify(notificationPublisher).enqueue(3L, 7L, 1L,
                 "SATISFACTION_REQUESTED", "工单已解决，欢迎评价",
                 "工单 OPF-SAT-001 已解决，请对本次服务进行评价。",
-                "SATISFACTION_REQUESTED:1");
+                "SATISFACTION_REQUESTED:1", "TICKET", 1L);
     }
 
     @Test

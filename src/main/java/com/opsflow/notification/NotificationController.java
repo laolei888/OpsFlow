@@ -15,6 +15,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NotificationController {
     private final NotificationService notificationService;
+    private final SlaNotificationService slaNotificationService;
 
     @GetMapping
     public ApiResponse<List<Notification>> list(
@@ -46,6 +47,6 @@ public class NotificationController {
         if (!principal.hasAnyRole("AGENT", "ADMIN")) {
             throw new BusinessException("只有客服或管理员可以执行 SLA 扫描");
         }
-        return ApiResponse.ok(notificationService.scanTenant(principal.tenantId()), "SLA 扫描完成");
+        return ApiResponse.ok(slaNotificationService.scanTenant(principal.tenantId()), "SLA 扫描完成");
     }
 }
