@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
 
 const AlertCenter = defineAsyncComponent(() => import('./components/AlertCenter.vue'))
 const AsyncMessageCenter = defineAsyncComponent(() => import('./components/AsyncMessageCenter.vue'))
+const NotificationPreferenceModal = defineAsyncComponent(() => import('./components/NotificationPreferenceModal.vue'))
 const GlobalSearch = defineAsyncComponent(() => import('./components/GlobalSearch.vue'))
 const IncidentCommandCenter = defineAsyncComponent(() => import('./components/IncidentCommandCenter.vue'))
 const OnCallCenter = defineAsyncComponent(() => import('./components/OnCallCenter.vue'))
@@ -48,6 +49,7 @@ const showAssignModal = ref(false)
 const showPasswordModal = ref(false)
 const changingPassword = ref(false)
 const showNotifications = ref(false)
+const showNotificationPreferences = ref(false)
 const loadingNotifications = ref(false)
 const showDetail = ref(false)
 const showEditTicketModal = ref(false)
@@ -306,7 +308,8 @@ Object.assign(auditLabels, {
   RUNBOOK_EXECUTION_CANCELLED: '取消运行手册处置',
   RUNBOOK_ALERT_MATCHER_CREATED: '创建告警运行手册推荐规则', RUNBOOK_ALERT_MATCHER_UPDATED: '更新告警运行手册推荐规则',
   ASYNC_MESSAGE_RETRY: '重放异步消息', DEAD_LETTER_REQUEUED: '重新入队死信消息',
-  DEAD_LETTER_DISCARDED: '作废死信消息', DEAD_LETTER_EXPORTED: '导出死信记录'
+  DEAD_LETTER_DISCARDED: '作废死信消息', DEAD_LETTER_EXPORTED: '导出死信记录',
+  NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递'
 })
 const auditActionOptions = [
   { value: 'CREATED', label: '创建工单' },
@@ -400,7 +403,9 @@ const auditActionOptions = [
   { value: 'ASYNC_MESSAGE_RETRY', label: '重放异步消息' },
   { value: 'DEAD_LETTER_REQUEUED', label: '重新入队死信消息' },
   { value: 'DEAD_LETTER_DISCARDED', label: '作废死信消息' },
-  { value: 'DEAD_LETTER_EXPORTED', label: '导出死信记录' }
+  { value: 'DEAD_LETTER_EXPORTED', label: '导出死信记录' },
+  { value: 'NOTIFICATION_PREFERENCES_UPDATED', label: '更新通知偏好' },
+  { value: 'NOTIFICATION_DELIVERY_RETRY', label: '重试通知投递' }
 ]
 const nextStatus = { OPEN: 'IN_PROGRESS', IN_PROGRESS: 'WAITING_CONFIRMATION', WAITING_CONFIRMATION: 'RESOLVED', RESOLVED: 'CLOSED' }
 function canAdvanceTicket(ticket) {
@@ -645,6 +650,7 @@ function logout() {
   selectedSavedViewId.value = ''
   editingSavedView.value = null
   showNotifications.value = false
+  showNotificationPreferences.value = false
   showAuditExportModal.value = false
   auditExportActions.value = []
 
@@ -2652,7 +2658,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
       </aside>
 
       <div class="content-area">
-        <header class="topbar"><div><p class="eyebrow">{{ pageEyebrow }}</p><h1>{{ pageTitle }}</h1></div><div class="topbar-user"><div class="notification-wrap"><button class="notification-button" @click="toggleNotifications" aria-label="打开通知中心">♢<b v-if="notificationUnread">{{ notificationUnread > 99 ? '99+' : notificationUnread }}</b></button><div v-if="showNotifications" class="notification-popover"><div class="notification-header"><strong>通知中心</strong><div><button v-if="canBulkUpdate" class="notification-scan" @click.stop="runSlaScan">扫描 SLA</button><button class="notification-scan" @click.stop="markAllNotifications">全部已读</button></div></div><div v-if="loadingNotifications" class="notification-empty">正在加载通知…</div><div v-else-if="!notifications.length" class="notification-empty">暂无通知</div><button v-for="notification in notifications" v-else :key="notification.id" :class="['notification-item', { unread: !notification.readAt }]" @click="openNotification(notification)"><i></i><div><strong>{{ notification.title }}</strong><p>{{ notification.content }}</p><small>{{ formatDate(notification.createdAt) }}</small></div></button><div class="notification-footer">自动扫描 SLA 风险 · 仅展示最近 20 条</div></div></div><div class="avatar">{{ displayName.slice(0, 1) }}</div><div><strong>{{ displayName }}</strong><small>{{ user?.roles?.join(' · ') || 'REQUESTER' }}</small></div><button class="account-action" @click="showPasswordModal = true">修改密码</button></div></header>
+        <header class="topbar"><div><p class="eyebrow">{{ pageEyebrow }}</p><h1>{{ pageTitle }}</h1></div><div class="topbar-user"><div class="notification-wrap"><button class="notification-button" @click="toggleNotifications" aria-label="打开通知中心">♢<b v-if="notificationUnread">{{ notificationUnread > 99 ? '99+' : notificationUnread }}</b></button><div v-if="showNotifications" class="notification-popover"><div class="notification-header"><strong>通知中心</strong><div><button class="notification-scan" @click.stop="showNotificationPreferences = true; showNotifications = false">渠道偏好</button><button v-if="canBulkUpdate" class="notification-scan" @click.stop="runSlaScan">扫描 SLA</button><button class="notification-scan" @click.stop="markAllNotifications">全部已读</button></div></div><div v-if="loadingNotifications" class="notification-empty">正在加载通知…</div><div v-else-if="!notifications.length" class="notification-empty">暂无通知</div><button v-for="notification in notifications" v-else :key="notification.id" :class="['notification-item', { unread: !notification.readAt }]" @click="openNotification(notification)"><i></i><div><strong>{{ notification.title }}</strong><p>{{ notification.content }}</p><small>{{ formatDate(notification.createdAt) }}</small></div></button><div class="notification-footer">支持站内信、邮件与签名 Webhook · 仅展示最近 20 条</div></div></div><div class="avatar">{{ displayName.slice(0, 1) }}</div><div><strong>{{ displayName }}</strong><small>{{ user?.roles?.join(' · ') || 'REQUESTER' }}</small></div><button class="account-action" @click="showPasswordModal = true">修改密码</button></div></header>
         <p v-if="error" class="page-error">{{ error }} <button @click="error = ''">×</button></p>
 
         <section v-if="activeView === 'overview'" class="view-panel">
@@ -2833,6 +2839,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
         <div class="modal-actions"><button type="button" class="secondary-button" @click="closeAutomationModal">取消</button><button class="primary-button" :disabled="savingAutomationRule">{{ savingAutomationRule ? '保存中…' : '保存规则' }}</button></div>
       </form>
     </div>
+    <NotificationPreferenceModal :visible="showNotificationPreferences" :api="api" @close="showNotificationPreferences = false" @saved="notify('通知偏好已保存')" />
     <transition name="toast"><div v-if="toast" class="toast-message">✓ {{ toast }}</div></transition>
   </main>
 </template>

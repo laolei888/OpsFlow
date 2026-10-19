@@ -14,12 +14,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NotificationService {
     private final NotificationMapper notificationMapper;
+    private final NotificationDeliveryService deliveryService;
 
     public List<Notification> list(Long recipientId, Long tenantId, boolean unreadOnly, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 100));
         LambdaQueryWrapper<Notification> query = new LambdaQueryWrapper<Notification>()
                 .eq(Notification::getRecipientId, recipientId)
                 .eq(Notification::getTenantId, tenantId)
+                .eq(Notification::getInAppEnabled, true)
                 .orderByDesc(Notification::getCreatedAt)
                 .last("LIMIT " + safeLimit);
         if (unreadOnly) query.isNull(Notification::getReadAt);
@@ -30,6 +32,7 @@ public class NotificationService {
         return notificationMapper.selectCount(new LambdaQueryWrapper<Notification>()
                 .eq(Notification::getRecipientId, recipientId)
                 .eq(Notification::getTenantId, tenantId)
+                .eq(Notification::getInAppEnabled, true)
                 .isNull(Notification::getReadAt));
     }
 
@@ -62,6 +65,8 @@ public class NotificationService {
         if (notificationMapper.selectCount(exists) > 0) return false;
 
         Notification notification = new Notification();
+        NotificationPreferenceService.ResolvedPreference preference = deliveryService.resolve(
+                tenantId, recipientId, type);
         notification.setTenantId(tenantId);
         notification.setRecipientId(recipientId);
         notification.setTicketId(ticketId);
@@ -69,8 +74,10 @@ public class NotificationService {
         notification.setTitle(title);
         notification.setContent(content);
         notification.setDedupeKey(dedupeKey);
+        notification.setInAppEnabled(preference.inAppEnabled());
         notification.setCreatedAt(LocalDateTime.now());
         notificationMapper.insert(notification);
+        deliveryService.plan(notification, preference);
         return true;
     }
     public int markAllRead(Long recipientId, Long tenantId) {

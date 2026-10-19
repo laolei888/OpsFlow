@@ -101,6 +101,14 @@ opsflow_messaging_dead_letter_quarantined{job="opsflow"}
 # 人工重新入队与作废速率
 sum(rate(opsflow_messaging_dead_letter_requeued_total{job="opsflow"}[5m]))
 sum(rate(opsflow_messaging_dead_letter_discarded_total{job="opsflow"}[5m]))
+
+# 多渠道通知积压与死信
+opsflow_notification_delivery_pending{job="opsflow"}
+opsflow_notification_delivery_dead{job="opsflow"}
+
+# 按渠道统计投递成功和失败速率
+sum by (channel) (rate(opsflow_notification_delivery_succeeded_total{job="opsflow"}[5m]))
+sum by (channel) (rate(opsflow_notification_delivery_failed_total{job="opsflow"}[5m]))
 ```
 
 管理员还可以在“异步消息”页面打开单条诊断，结合故障分类、Broker 路由键、幂等键、

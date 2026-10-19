@@ -69,6 +69,7 @@
 - RabbitMQ 可靠异步消息中心：工单、支持组、SLA、重大事件、值班升级、监控告警、变更、问题、服务申请、事件复盘和运营报表通知，均与业务数据在同一数据库事务写入通用消息 Outbox；后台发布器通过 Publisher Confirm 确认后才标记已发布，消费者使用通知去重键保证至少一次投递下的业务幂等，消费异常最多重试 5 次后进入持久化死信队列。Outbox 支持多实例租约抢占、8 次指数退避、人工/批量重放、30 天清理和 Prometheus 积压/消费指标
 - 管理员异步消息运维页面：按状态、业务域、通知类型和关键词检索最近消息，展示发布尝试、下次重试、错误原因和业务对象，支持勾选失败或死信消息后一键批量重放；单条诊断可查看故障分类、排查建议、剩余自动重试、路由键、幂等键和消息负载，页面每 15 秒自动刷新积压摘要
 - RabbitMQ 死信治理中心：消费重试耗尽的 Broker 消息由独立消费者可靠归档至租户隔离区，保留原始负载、`x-death` 头、源队列、死亡原因和处置历史；管理员可逐条勾选导出 CSV，输入完整消息 ID 与处置依据后受控重新入队或作废。重投使用 Publisher Confirm，失败自动恢复隔离状态，重复消费继续由业务幂等键兜底，所有人工处置写入审计日志
+- 多渠道通知投递中心：用户可按事件类型配置站内信、邮件和个人 Webhook 偏好，具体事件规则覆盖默认规则；每个渠道独立记录目标快照、尝试次数、响应状态和送达时间，后台使用 60 秒租约与最多 5 次指数退避投递。个人 Webhook 经过 SSRF 校验并使用 HMAC-SHA256 签名，管理员可在异步消息中心查看脱敏投递流水、积压与死信并填写原因后人工重试；SMTP 未启用时邮件失败会显式进入可诊断终态
 - AGENT/ADMIN 客服目录与工单指派，指派动作进入审计时间线
 - 申请人的看板、SLA 汇总与工单列表按 requesterId 做资源级隔离
 - 可选环境变量初始化 AGENT/ADMIN 演示账号，不写死默认高权限密码
@@ -118,7 +119,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 195 个业务单元测试，不依赖 Docker
+# 201 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -142,7 +143,7 @@ node quality/observability-smoke.mjs
 docker compose --profile quality run --rm --no-deps k6
 ```
 
-`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V40 的全部 Flyway
+`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V41 的全部 Flyway
 迁移、CSAT 唯一约束和数据库聚合查询。Windows 本地环境若无法访问 Docker 命名管道，
 也可以通过 `OPSFLOW_IT_JDBC_URL`、`OPSFLOW_IT_DB_USERNAME` 和
 `OPSFLOW_IT_DB_PASSWORD` 指向一个独立测试数据库；不要连接生产库。
@@ -532,6 +533,19 @@ RabbitMQ 异步消息运维接口（ADMIN）：
 
 主交换机为 `opsflow.events.v1`，通知队列为 `opsflow.notifications.v1`，消费重试耗尽后消息进入 `opsflow.notifications.dead.v1`。专用隔离消费者不复用业务消费重试策略；数据库暂时不可用时消息会重新入队，成功归档后才向 Broker 确认，避免观测链路造成二次丢失。重新入队和作废请求都必须提交完整消息 ID 及不少于 5 个字符的处置原因。
 
+多渠道通知偏好与投递接口：
+
+    GET    /api/v1/notification-preferences
+    PUT    /api/v1/notification-preferences
+    GET    /api/v1/admin/notification-deliveries
+    GET    /api/v1/admin/notification-deliveries/summary
+    POST   /api/v1/admin/notification-deliveries/{id}/retry
+
+新用户默认只接收站内信。个人 Webhook 使用 `X-OpsFlow-Notification`、`X-OpsFlow-Event` 和
+`X-OpsFlow-Signature` 请求头；签名算法为 HMAC-SHA256。邮件通道需同时设置
+`OPSFLOW_NOTIFICATION_EMAIL_ENABLED=true`、`OPSFLOW_NOTIFICATION_EMAIL_FROM` 以及标准
+`SPRING_MAIL_*` SMTP 参数。生产环境应使用独立应用密码或密钥管理服务注入凭据。
+
 健康检查：
 
 ```bash
@@ -542,7 +556,7 @@ curl http://localhost:8081/actuator/health
 
 1. 增加附件病毒扫描和异步隔离区
 2. 基于当前 Prometheus 历史数据增加持续容量趋势报告和版本对比
-3. 增加邮件、企业微信等多渠道消息通知
+3. 增加企业微信适配器与通知模板版本管理
 4. 增加 SSO/OIDC 与更细粒度的权限策略
 
 通知接口：

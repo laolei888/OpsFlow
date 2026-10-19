@@ -16,11 +16,15 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
     @Mock private NotificationMapper notificationMapper;
+    @Mock private NotificationDeliveryService deliveryService;
     @InjectMocks private NotificationService notificationService;
 
     @Test
     void createsIdempotentNotificationForConsumer() {
         when(notificationMapper.selectCount(any())).thenReturn(0L);
+        NotificationPreferenceService.ResolvedPreference preference = new NotificationPreferenceService.ResolvedPreference(
+                true, false, false, null, null, null);
+        when(deliveryService.resolve(1L, 8L, "SLA_OVERDUE")).thenReturn(preference);
 
         boolean created = notificationService.notifyIfAbsent(1L, 8L, 21L,
                 "SLA_OVERDUE", "SLA 已逾期", "请立即处理", "SLA_OVERDUE:21");
@@ -31,6 +35,8 @@ class NotificationServiceTest {
         assertThat(captor.getValue().getRecipientId()).isEqualTo(8L);
         assertThat(captor.getValue().getTicketId()).isEqualTo(21L);
         assertThat(captor.getValue().getDedupeKey()).isEqualTo("SLA_OVERDUE:21");
+        assertThat(captor.getValue().getInAppEnabled()).isTrue();
+        verify(deliveryService).plan(captor.getValue(), preference);
     }
 
     @Test

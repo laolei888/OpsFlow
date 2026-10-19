@@ -61,6 +61,9 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+  health:
+    mail:
+      enabled: ${OPSFLOW_NOTIFICATION_EMAIL_ENABLED:false}
   metrics:
     tags:
       application: ${spring.application.name}
@@ -159,6 +162,12 @@ opsflow:
     publish-confirm-timeout: ${OPSFLOW_MESSAGING_CONFIRM_TIMEOUT:5s}
     consumer-concurrency: ${OPSFLOW_MESSAGING_CONSUMER_CONCURRENCY:2}
     dead-letter-concurrency: ${OPSFLOW_MESSAGING_DEAD_LETTER_CONCURRENCY:1}
+  notification:
+    delivery-interval-ms: ${OPSFLOW_NOTIFICATION_DELIVERY_INTERVAL_MS:10000}
+    initial-delay-ms: ${OPSFLOW_NOTIFICATION_INITIAL_DELAY_MS:15000}
+    email:
+      enabled: ${OPSFLOW_NOTIFICATION_EMAIL_ENABLED:false}
+      from: ${OPSFLOW_NOTIFICATION_EMAIL_FROM:}
   storage:
     upload-dir: ${OPSFLOW_UPLOAD_DIR:/app/uploads}
     max-file-size: ${OPSFLOW_MAX_UPLOAD_BYTES:10485760}

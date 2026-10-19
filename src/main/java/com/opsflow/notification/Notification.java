@@ -19,6 +19,7 @@ public class Notification {
     private String title;
     private String content;
     private String dedupeKey;
+    private Boolean inAppEnabled;
     private LocalDateTime readAt;
     private LocalDateTime createdAt;
 }

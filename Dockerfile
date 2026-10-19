@@ -14,7 +14,7 @@ COPY pom.xml .
 COPY src ./src
 COPY --from=frontend-build /frontend/dist ./src/main/resources/static
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -B -Dmaven.test.skip=true package
+    mvn -B -ntp -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:17-jre-alpine
 LABEL org.opencontainers.image.title="OpsFlow" \

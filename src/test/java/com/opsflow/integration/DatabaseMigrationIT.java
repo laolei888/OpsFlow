@@ -42,6 +42,9 @@ class DatabaseMigrationIT {
         try (Connection connection = connection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("DELETE FROM ticket_satisfaction_responses");
+            statement.executeUpdate("DELETE FROM notification_deliveries");
+            statement.executeUpdate("DELETE FROM notification_event_preferences");
+            statement.executeUpdate("DELETE FROM notification_channel_profiles");
             statement.executeUpdate("DELETE FROM async_dead_letter_messages");
             statement.executeUpdate("DELETE FROM async_message_outbox");
         }
@@ -79,10 +82,20 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV40() {
+    void appliesEveryMigrationThroughV41() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("40", flyway.info().current().getVersion().getVersion());
-        assertEquals(40, flyway.info().applied().length);
+        assertEquals("41", flyway.info().current().getVersion().getVersion());
+        assertEquals(41, flyway.info().applied().length);
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'notifications'
+                       AND column_name = 'in_app_enabled'
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(1, result.getInt(1));
+        }
     }
 
     @Test
@@ -138,6 +151,15 @@ class DatabaseMigrationIT {
         insertDeadLetter(2L, "message-0000000000000000000000000001");
     }
 
+    @Test
+    void enforcesOneNotificationPreferencePerTenantUserAndEvent() throws SQLException {
+        insertNotificationPreference(1L, 7L, "SLA_OVERDUE");
+        assertThrows(SQLException.class,
+                () -> insertNotificationPreference(1L, 7L, "SLA_OVERDUE"));
+        insertNotificationPreference(1L, 7L, "INCIDENT_DECLARED");
+        insertNotificationPreference(2L, 7L, "SLA_OVERDUE");
+    }
+
     private void insertResponse(Long tenantId, Long ticketId, Long requesterId,
                                 Long assigneeId, Long groupId, int rating) throws SQLException {
         String sql = """
@@ -190,6 +212,22 @@ class DatabaseMigrationIT {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, tenantId);
             statement.setString(2, messageId);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertNotificationPreference(Long tenantId, Long userId, String eventType) throws SQLException {
+        String sql = """
+                INSERT INTO notification_event_preferences
+                    (tenant_id, user_id, event_type, in_app_enabled, email_enabled, webhook_enabled,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, TRUE, FALSE, FALSE, NOW(), NOW())
+                """;
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, tenantId);
+            statement.setLong(2, userId);
+            statement.setString(3, eventType);
             statement.executeUpdate();
         }
     }

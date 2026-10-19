@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import NotificationDeliveryCenter from './NotificationDeliveryCenter.vue'
 
 const props = defineProps({
   api: { type: Function, required: true },
@@ -283,6 +284,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
     <nav class="message-tabs" aria-label="消息中心视图">
       <button :class="{ active: activeSection === 'outbox' }" @click="activeSection = 'outbox'">事务 Outbox</button>
       <button :class="{ active: activeSection === 'deadLetters' }" @click="activeSection = 'deadLetters'">死信治理 <span v-if="deadSummary.quarantined">{{ deadSummary.quarantined }}</span></button>
+      <button :class="{ active: activeSection === 'deliveries' }" @click="activeSection = 'deliveries'">渠道投递</button>
     </nav>
 
     <div v-if="activeSection === 'outbox'" class="message-panel">
@@ -332,7 +334,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       </aside>
     </div>
 
-    <div v-else class="message-panel dead-letter-panel">
+    <div v-else-if="activeSection === 'deadLetters'" class="message-panel dead-letter-panel">
       <div class="dead-letter-heading">
         <div><p>BROKER DEAD-LETTER GOVERNANCE</p><h3>死信隔离区</h3><span>消费重试耗尽的消息会从 RabbitMQ DLQ 自动归档；处置操作要求消息 ID 二次确认。</span></div>
         <div class="dead-letter-summary"><b>{{ deadSummary.quarantined }}</b><span>待处置</span><b>{{ deadSummary.requeued }}</b><span>已重投</span><b>{{ deadSummary.discarded }}</b><span>已作废</span></div>
@@ -378,6 +380,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
         <details><summary>查看 RabbitMQ 头信息</summary><pre>{{ selectedDeadDetail.headersJson }}</pre></details>
       </aside>
     </div>
+
+    <div v-else class="message-panel"><NotificationDeliveryCenter :api="api" /></div>
 
     <div v-if="deadOperation" class="dead-operation-backdrop" @click.self="deadOperation = null">
       <form class="dead-operation-card" @submit.prevent="submitDeadOperation">
