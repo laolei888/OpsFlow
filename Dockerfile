@@ -22,6 +22,7 @@ LABEL org.opencontainers.image.title="OpsFlow" \
       org.opencontainers.image.source="https://github.com/laolei888/OpsFlow"
 WORKDIR /app
 RUN apk upgrade --no-cache \
+    && apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' \
     && addgroup -S -g 10001 opsflow \
     && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin -G opsflow opsflow \
     && mkdir -p /app/uploads /app/logs \

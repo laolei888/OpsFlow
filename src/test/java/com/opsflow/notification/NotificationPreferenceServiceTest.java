@@ -66,6 +66,17 @@ class NotificationPreferenceServiceTest {
                 .hasMessageContaining("邮件地址");
     }
 
+    @Test
+    void rejectsAdversarialEmailWithoutRegexBacktracking() {
+        String malformed = "!@!." + "!.".repeat(120);
+        NotificationPreferenceService.PreferenceCommand command = new NotificationPreferenceService.PreferenceCommand(
+                malformed, null, null, List.of(new NotificationPreferenceService.RuleCommand("*", true, false, false)));
+
+        assertThatThrownBy(() -> preferenceService.update(command, 1L, 7L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("邮件地址格式无效");
+    }
+
     private NotificationEventPreference preference(String type, boolean inApp, boolean email, boolean webhook) {
         NotificationEventPreference preference = new NotificationEventPreference();
         preference.setEventType(type);

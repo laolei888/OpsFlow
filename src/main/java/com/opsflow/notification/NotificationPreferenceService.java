@@ -16,14 +16,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class NotificationPreferenceService {
-    private static final Pattern EVENT_TYPE_PATTERN = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
-
     private final NotificationChannelProfileMapper profileMapper;
     private final NotificationEventPreferenceMapper preferenceMapper;
     private final OutboundUrlPolicy outboundUrlPolicy;
@@ -163,7 +159,7 @@ public class NotificationPreferenceService {
     private String normalizeEmail(String value) {
         String result = trim(value);
         if (result == null) return null;
-        if (result.length() > 254 || !EMAIL_PATTERN.matcher(result).matches()) {
+        if (!isValidEmail(result)) {
             throw new BusinessException("邮件地址格式无效");
         }
         return result.toLowerCase(Locale.ROOT);
@@ -180,10 +176,56 @@ public class NotificationPreferenceService {
     private String normalizeEventType(String value, boolean allowWildcard) {
         String result = trim(value);
         if (allowWildcard && "*".equals(result)) return result;
-        if (result == null || !EVENT_TYPE_PATTERN.matcher(result.toUpperCase(Locale.ROOT)).matches()) {
+        if (result == null) {
             throw new BusinessException("通知事件类型格式无效");
         }
-        return result.toUpperCase(Locale.ROOT);
+        String normalized = result.toUpperCase(Locale.ROOT);
+        if (!isValidEventType(normalized)) throw new BusinessException("通知事件类型格式无效");
+        return normalized;
+    }
+
+    private boolean isValidEmail(String value) {
+        if (value.length() > 254) return false;
+        int separator = value.indexOf('@');
+        if (separator <= 0 || separator != value.lastIndexOf('@') || separator > 64 || separator == value.length() - 1) {
+            return false;
+        }
+        String local = value.substring(0, separator);
+        String domain = value.substring(separator + 1);
+        if (local.startsWith(".") || local.endsWith(".") || local.contains("..")
+                || domain.length() > 253 || domain.indexOf('.') <= 0 || domain.endsWith(".") || domain.contains("..")) {
+            return false;
+        }
+        for (int i = 0; i < local.length(); i++) {
+            char current = local.charAt(i);
+            if (!isAsciiLetterOrDigit(current) && "!#$%&'*+-/=?^_`{|}~.".indexOf(current) < 0) return false;
+        }
+        int labelStart = 0;
+        for (int i = 0; i <= domain.length(); i++) {
+            if (i < domain.length() && domain.charAt(i) != '.') continue;
+            int labelLength = i - labelStart;
+            if (labelLength < 1 || labelLength > 63 || domain.charAt(labelStart) == '-'
+                    || domain.charAt(i - 1) == '-') return false;
+            for (int j = labelStart; j < i; j++) {
+                char current = domain.charAt(j);
+                if (!isAsciiLetterOrDigit(current) && current != '-') return false;
+            }
+            labelStart = i + 1;
+        }
+        return true;
+    }
+
+    private boolean isValidEventType(String value) {
+        if (value.isEmpty() || value.length() > 64 || value.charAt(0) < 'A' || value.charAt(0) > 'Z') return false;
+        for (int i = 1; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if ((current < 'A' || current > 'Z') && (current < '0' || current > '9') && current != '_') return false;
+        }
+        return true;
+    }
+
+    private boolean isAsciiLetterOrDigit(char value) {
+        return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9';
     }
 
     private String maskSecret(String value) {
