@@ -109,6 +109,17 @@ opsflow_notification_delivery_dead{job="opsflow"}
 # 按渠道统计投递成功和失败速率
 sum by (channel) (rate(opsflow_notification_delivery_succeeded_total{job="opsflow"}[5m]))
 sum by (channel) (rate(opsflow_notification_delivery_failed_total{job="opsflow"}[5m]))
+
+# 附件安全扫描积压、感染隔离与终态失败
+opsflow_attachment_scan_pending{job="opsflow"}
+opsflow_attachment_scan_infected{job="opsflow"}
+opsflow_attachment_scan_failed{job="opsflow"}
+
+# 附件自动放行、威胁阻断、扫描错误与人工放行速率
+rate(opsflow_attachment_scan_clean_total{job="opsflow"}[5m])
+rate(opsflow_attachment_scan_blocked_total{job="opsflow"}[5m])
+rate(opsflow_attachment_scan_errors_total{job="opsflow"}[5m])
+rate(opsflow_attachment_scan_manual_releases_total{job="opsflow"}[5m])
 ```
 
 管理员还可以在“异步消息”页面打开单条诊断，结合故障分类、Broker 路由键、幂等键、

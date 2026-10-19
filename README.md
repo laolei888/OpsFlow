@@ -75,8 +75,9 @@
 - 可选环境变量初始化 AGENT/ADMIN 演示账号，不写死默认高权限密码
 - SLA 定时扫描与站内通知：逾期、24 小时内到期、未读数、单条/全部已读
 - 通知按 tenantId 与 recipientId 隔离，并通过 dedupeKey 避免重复提醒
-- 工单附件上传、列表、下载和删除，支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件
-- 图片附件详情页预览，继续复用带 JWT 的安全下载链路
+- 附件安全中心：所有新附件先写入租户隔离区并进入异步扫描状态机，完成 SHA-256 取证、EICAR/可执行文件特征检查、压缩包路径穿越与高压缩比防护后才移动到安全区；可选接入 ClamAV INSTREAM 协议进行完整病毒扫描
+- 扫描中的附件禁止预览和下载，感染与终态失败文件持续保留在隔离区；管理员可查看扫描引擎、结论、哈希、重试次数与积压摘要，填写原因后重新扫描，或输入完整 SHA-256 执行带审计的高风险人工放行
+- 工单附件上传、列表和删除继续支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件；图片预览复用带 JWT 的安全下载链路
 - ADMIN 团队管理：创建账号、启停用、角色调整，并保护最后一名管理员
 - ADMIN 全局审计日志检索：按动作、操作者和时间范围筛选
 - 用户管理变更自动写入 USER_CREATED、USER_STATUS_CHANGED、USER_ROLE_CHANGED 审计记录
@@ -105,6 +106,9 @@ cp .env.example .env
 # 轻量业务栈：应用、MySQL、Redis、RabbitMQ
 docker compose up --build
 
+# 可选：同时启动 ClamAV，并在 .env 中设置 OPSFLOW_ATTACHMENT_CLAMAV_ENABLED=true
+docker compose --profile antivirus up -d --build
+
 # 完整可观测栈：额外启用 Prometheus、Tempo、Loki、Alloy、Grafana
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
 ```
@@ -119,7 +123,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 202 个业务单元测试，不依赖 Docker
+# 213 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -268,6 +272,16 @@ curl -X POST -H "Authorization: Bearer <TOKEN>" \
 
     curl -H "Authorization: Bearer <TOKEN>" \
       http://localhost:8081/api/v1/tickets/1/attachments
+
+上传成功只表示文件已进入隔离区。只有 `scanStatus` 为 `CLEAN` 或 `RELEASED` 时，下载与图片预览接口才会放行。
+附件安全管理接口仅限 ADMIN：
+
+    GET    /api/v1/admin/attachment-security
+    GET    /api/v1/admin/attachment-security/summary
+    POST   /api/v1/admin/attachment-security/{id}/retry
+    POST   /api/v1/admin/attachment-security/{id}/release
+
+人工放行必须同时提交不少于 5 个字符的原因和当前记录的完整 64 位 SHA-256；该操作会写入审计日志。
 
 管理员团队与审计接口：
 
@@ -554,10 +568,10 @@ curl http://localhost:8081/actuator/health
 
 ## 后续迭代计划
 
-1. 增加附件病毒扫描和异步隔离区
-2. 基于当前 Prometheus 历史数据增加持续容量趋势报告和版本对比
-3. 增加企业微信适配器与通知模板版本管理
-4. 增加 SSO/OIDC 与更细粒度的权限策略
+1. 基于当前 Prometheus 历史数据增加持续容量趋势报告和版本对比
+2. 增加企业微信适配器与通知模板版本管理
+3. 增加 SSO/OIDC 与更细粒度的权限策略
+4. 增加对象存储直传、分片上传和隔离文件生命周期策略
 
 通知接口：
 

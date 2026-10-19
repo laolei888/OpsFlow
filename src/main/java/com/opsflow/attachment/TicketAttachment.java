@@ -23,7 +23,22 @@ public class TicketAttachment {
     private Long sizeBytes;
     @JsonIgnore
     private String storagePath;
+    private AttachmentScanStatus scanStatus;
+    private String scanEngine;
+    private String scanResult;
+    private String sha256;
+    private Integer scanAttempts;
+    private LocalDateTime nextScanAt;
+    @JsonIgnore
+    private String scanClaimToken;
+    private LocalDateTime scanClaimedAt;
+    private LocalDateTime scannedAt;
+    private LocalDateTime quarantinedAt;
+    private Long releasedBy;
+    private LocalDateTime releasedAt;
+    private String releaseReason;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 
     @TableField(exist = false)
     private String downloadUrl;

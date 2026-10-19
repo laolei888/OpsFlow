@@ -80,7 +80,7 @@ public class TicketAttachmentService {
         String verifiedContentType = verifyContent(file, extension);
 
         String storedName = UUID.randomUUID() + "." + extension;
-        Path target = resolvePath(tenantId, ticketId, storedName);
+        Path target = resolvePath(tenantId, ticketId, "quarantine", storedName);
         try {
             Files.createDirectories(target.getParent());
             file.transferTo(target);
@@ -97,13 +97,20 @@ public class TicketAttachmentService {
         attachment.setStoredName(storedName);
         attachment.setContentType(verifiedContentType);
         attachment.setSizeBytes(file.getSize());
-        attachment.setStoragePath(relativePath(tenantId, ticketId, storedName));
-        attachment.setCreatedAt(LocalDateTime.now());
+        attachment.setStoragePath(relativePath(tenantId, ticketId, "quarantine", storedName));
+        attachment.setScanStatus(AttachmentScanStatus.PENDING);
+        attachment.setScanAttempts(0);
+        LocalDateTime now = LocalDateTime.now();
+        attachment.setNextScanAt(now);
+        attachment.setQuarantinedAt(now);
+        attachment.setCreatedAt(now);
+        attachment.setUpdatedAt(now);
         try {
             attachmentMapper.insert(attachment);
             auditLogService.record(tenantId, uploaderId, "TICKET", ticketId, "ATTACHMENT_ADDED",
-                    null, java.util.Map.of("attachmentId", attachment.getId(), "name", originalName),
-                    "上传附件");
+                    null, java.util.Map.of("attachmentId", attachment.getId(), "name", originalName,
+                            "scanStatus", AttachmentScanStatus.PENDING),
+                    "上传附件并进入安全隔离区");
             return attachment;
         } catch (RuntimeException ex) {
             deleteQuietly(target);
@@ -114,6 +121,10 @@ public class TicketAttachmentService {
     public DownloadedAttachment download(Long ticketId, Long attachmentId, Long tenantId, Long requesterId) {
         ticketService.getVisible(ticketId, tenantId, requesterId);
         TicketAttachment attachment = find(ticketId, attachmentId, tenantId);
+        if (attachment.getScanStatus() != AttachmentScanStatus.CLEAN
+                && attachment.getScanStatus() != AttachmentScanStatus.RELEASED) {
+            throw new AttachmentDownloadBlockedException(downloadBlockedMessage(attachment.getScanStatus()));
+        }
         Path path = resolveStoredPath(attachment);
         try {
             Resource resource = new UrlResource(path.toUri());
@@ -130,7 +141,7 @@ public class TicketAttachmentService {
     public void delete(Long ticketId, Long attachmentId, Long actorId, Long tenantId,
                        boolean staff, Long requesterId) {
         ticketService.getVisible(ticketId, tenantId, requesterId);
-        TicketAttachment attachment = find(ticketId, attachmentId, tenantId);
+        TicketAttachment attachment = findForUpdate(ticketId, attachmentId, tenantId);
         if (!staff && !actorId.equals(attachment.getUploaderId())) {
             throw new BusinessException("只能删除自己上传的附件");
         }
@@ -150,9 +161,18 @@ public class TicketAttachmentService {
         return attachment;
     }
 
-    private Path resolvePath(Long tenantId, Long ticketId, String storedName) {
+    private TicketAttachment findForUpdate(Long ticketId, Long attachmentId, Long tenantId) {
+        TicketAttachment attachment = attachmentMapper.selectForUpdate(attachmentId, tenantId);
+        if (attachment == null || !ticketId.equals(attachment.getTicketId())) {
+            throw new BusinessException("附件不存在");
+        }
+        return attachment;
+    }
+
+    private Path resolvePath(Long tenantId, Long ticketId, String area, String storedName) {
         Path root = storageRoot();
-        Path target = root.resolve(String.valueOf(tenantId))
+        Path target = root.resolve(area)
+                .resolve(String.valueOf(tenantId))
                 .resolve(String.valueOf(ticketId))
                 .resolve(storedName)
                 .normalize();
@@ -167,8 +187,14 @@ public class TicketAttachmentService {
         return target;
     }
 
-    private String relativePath(Long tenantId, Long ticketId, String storedName) {
-        return tenantId + "/" + ticketId + "/" + storedName;
+    private String relativePath(Long tenantId, Long ticketId, String area, String storedName) {
+        return area + "/" + tenantId + "/" + ticketId + "/" + storedName;
+    }
+
+    private String downloadBlockedMessage(AttachmentScanStatus status) {
+        if (status == AttachmentScanStatus.INFECTED) return "附件检测到安全威胁，已被隔离";
+        if (status == AttachmentScanStatus.FAILED) return "附件安全扫描失败，等待管理员处理";
+        return "附件正在安全扫描，暂不可下载";
     }
 
     private Path storageRoot() {

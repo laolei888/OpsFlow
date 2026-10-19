@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import static org.mockito.ArgumentMatchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,10 +48,12 @@ class TicketAttachmentServiceTest {
             return 1;
         });
 
-        attachmentService.upload(1L, 7L, 1L, 7L, file);
+        TicketAttachment saved = attachmentService.upload(1L, 7L, 1L, 7L, file);
 
         verify(ticketService).getVisible(1L, 1L, 7L);
         verify(attachmentMapper).insert(any(TicketAttachment.class));
+        assertEquals(AttachmentScanStatus.PENDING, saved.getScanStatus());
+        assertTrue(saved.getStoragePath().startsWith("quarantine/"));
     }
 
     @Test
@@ -81,5 +84,20 @@ class TicketAttachmentServiceTest {
         TicketAttachment saved = attachmentService.upload(1L, 7L, 1L, 7L, file);
 
         assertEquals("text/plain", saved.getContentType());
+    }
+
+    @Test
+    void blocksDownloadUntilSecurityScanReleasesAttachment() {
+        TicketAttachment pending = new TicketAttachment();
+        pending.setId(100L);
+        pending.setTenantId(1L);
+        pending.setTicketId(1L);
+        pending.setScanStatus(AttachmentScanStatus.PENDING);
+        when(attachmentMapper.selectOne(any())).thenReturn(pending);
+
+        AttachmentDownloadBlockedException exception = assertThrows(AttachmentDownloadBlockedException.class,
+                () -> attachmentService.download(1L, 100L, 1L, 7L));
+
+        assertEquals("附件正在安全扫描，暂不可下载", exception.getMessage());
     }
 }

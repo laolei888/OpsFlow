@@ -111,6 +111,13 @@ services:
       SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH:-true}
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:-true}
+      OPSFLOW_ATTACHMENT_CLAMAV_ENABLED: ${OPSFLOW_ATTACHMENT_CLAMAV_ENABLED:-false}
+      OPSFLOW_ATTACHMENT_CLAMAV_HOST: ${OPSFLOW_ATTACHMENT_CLAMAV_HOST:-clamav}
+      OPSFLOW_ATTACHMENT_CLAMAV_PORT: ${OPSFLOW_ATTACHMENT_CLAMAV_PORT:-3310}
+      OPSFLOW_ATTACHMENT_CLAMAV_TIMEOUT_MS: ${OPSFLOW_ATTACHMENT_CLAMAV_TIMEOUT_MS:-5000}
+      OPSFLOW_ATTACHMENT_ARCHIVE_MAX_ENTRIES: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_ENTRIES:-2000}
+      OPSFLOW_ATTACHMENT_ARCHIVE_MAX_EXPANDED_BYTES: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_EXPANDED_BYTES:-104857600}
+      OPSFLOW_ATTACHMENT_ARCHIVE_MAX_RATIO: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_RATIO:-100}
       # Optional local demo account. Configure username and password together.
       OPSFLOW_BOOTSTRAP_USERNAME: ${OPSFLOW_BOOTSTRAP_USERNAME:-}
       OPSFLOW_BOOTSTRAP_PASSWORD: ${OPSFLOW_BOOTSTRAP_PASSWORD:-}
@@ -122,6 +129,19 @@ services:
     volumes:
       - opsflow_uploads:/app/uploads
     init: true
+    logging: *default-logging
+
+  clamav:
+    image: clamav/clamav:1.4
+    profiles: ["antivirus"]
+    volumes:
+      - opsflow_clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
     logging: *default-logging
 
   k6:
@@ -144,3 +164,4 @@ volumes:
 
   opsflow_uploads:
   opsflow_logs:
+  opsflow_clamav:

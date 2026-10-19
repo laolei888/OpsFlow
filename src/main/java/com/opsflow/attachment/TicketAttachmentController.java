@@ -2,19 +2,17 @@ package com.opsflow.attachment;
 
 import com.opsflow.auth.AuthPrincipal;
 import com.opsflow.common.ApiResponse;
-import com.opsflow.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.util.UriUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController
@@ -63,6 +61,12 @@ public class TicketAttachmentController {
         attachmentService.delete(ticketId, attachmentId, principal.id(), principal.tenantId(),
                 staff, staff ? null : principal.id());
         return ApiResponse.ok(null, "附件已删除");
+    }
+
+    @ExceptionHandler(AttachmentDownloadBlockedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDownloadBlocked(AttachmentDownloadBlockedException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiResponse<>(false, null, exception.getMessage()));
     }
 
     private Long requesterScope(AuthPrincipal principal) {

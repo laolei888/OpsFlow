@@ -168,6 +168,18 @@ opsflow:
     email:
       enabled: ${OPSFLOW_NOTIFICATION_EMAIL_ENABLED:false}
       from: ${OPSFLOW_NOTIFICATION_EMAIL_FROM:}
+  attachment-security:
+    scan-interval-ms: ${OPSFLOW_ATTACHMENT_SCAN_INTERVAL_MS:10000}
+    initial-delay-ms: ${OPSFLOW_ATTACHMENT_SCAN_INITIAL_DELAY_MS:12000}
+    clamav:
+      enabled: ${OPSFLOW_ATTACHMENT_CLAMAV_ENABLED:false}
+      host: ${OPSFLOW_ATTACHMENT_CLAMAV_HOST:localhost}
+      port: ${OPSFLOW_ATTACHMENT_CLAMAV_PORT:3310}
+      timeout-ms: ${OPSFLOW_ATTACHMENT_CLAMAV_TIMEOUT_MS:5000}
+    archive:
+      max-entries: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_ENTRIES:2000}
+      max-expanded-bytes: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_EXPANDED_BYTES:104857600}
+      max-ratio: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_RATIO:100}
   storage:
     upload-dir: ${OPSFLOW_UPLOAD_DIR:/app/uploads}
     max-file-size: ${OPSFLOW_MAX_UPLOAD_BYTES:10485760}

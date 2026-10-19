@@ -82,10 +82,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV41() throws SQLException {
+    void appliesEveryMigrationThroughV42() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("41", flyway.info().current().getVersion().getVersion());
-        assertEquals(41, flyway.info().applied().length);
+        assertEquals("42", flyway.info().current().getVersion().getVersion());
+        assertEquals(42, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
@@ -95,6 +95,16 @@ class DatabaseMigrationIT {
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertEquals(1, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'ticket_attachments'
+                       AND column_name IN ('scan_status', 'sha256', 'next_scan_at', 'quarantined_at', 'released_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(5, result.getInt(1));
         }
     }
 

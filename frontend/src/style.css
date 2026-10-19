@@ -142,7 +142,14 @@ nav { display: grid; gap: 5px; } nav button { display: flex; align-items: center
 .attachment-info small { margin-top: 4px; color: #a1aaba; font-size: 9px; }
 .attachment-action { padding: 5px 7px; color: #657ee7; background: transparent; font-size: 10px; font-weight: 700; }
 .attachment-action:hover { color: #3c57c5; }
+.attachment-action:disabled { color: #a6afbc; cursor: not-allowed; }
 .attachment-action.danger { color: #d25760; }
+.attachment-scan-status { padding: 4px 7px; border-radius: 999px; background: #eef1f4; color: #69788b; font-size: 9px; font-weight: 800; white-space: nowrap; }
+.attachment-scan-status.clean { background: #e4f6ef; color: #13755f; }
+.attachment-scan-status.infected { background: #ffe5e9; color: #a42d43; }
+.attachment-scan-status.failed { background: #fff0d8; color: #96600d; }
+.attachment-scan-status.scanning { background: #e9efff; color: #4d68bb; }
+.attachment-scan-status.released { background: #f2e9ff; color: #7350a2; }
 @media (max-width: 700px) { .attachment-toolbar { align-items: flex-start; flex-direction: column; gap: 7px; } .attachment-item { flex-wrap: wrap; } .attachment-info { min-width: calc(100% - 47px); } }
 .admin-caption { color: #8f9aae; font-size: 11px; }
 .export-button { color: #657ee7; background: #eef1ff; }
