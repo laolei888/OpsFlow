@@ -4,6 +4,7 @@ import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
 const AlertCenter = defineAsyncComponent(() => import('./components/AlertCenter.vue'))
 const AttachmentSecurityCenter = defineAsyncComponent(() => import('./components/AttachmentSecurityCenter.vue'))
 const AsyncMessageCenter = defineAsyncComponent(() => import('./components/AsyncMessageCenter.vue'))
+const CapacityPlanningCenter = defineAsyncComponent(() => import('./components/CapacityPlanningCenter.vue'))
 const NotificationPreferenceModal = defineAsyncComponent(() => import('./components/NotificationPreferenceModal.vue'))
 const GlobalSearch = defineAsyncComponent(() => import('./components/GlobalSearch.vue'))
 const IncidentCommandCenter = defineAsyncComponent(() => import('./components/IncidentCommandCenter.vue'))
@@ -311,6 +312,7 @@ Object.assign(auditLabels, {
   RUNBOOK_ALERT_MATCHER_CREATED: '创建告警运行手册推荐规则', RUNBOOK_ALERT_MATCHER_UPDATED: '更新告警运行手册推荐规则',
   ASYNC_MESSAGE_RETRY: '重放异步消息', DEAD_LETTER_REQUEUED: '重新入队死信消息',
   DEAD_LETTER_DISCARDED: '作废死信消息', DEAD_LETTER_EXPORTED: '导出死信记录',
+  CAPACITY_SNAPSHOT_CREATED: '创建容量快照',
   NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递'
 })
 const auditActionOptions = [
@@ -484,8 +486,8 @@ const filteredCmdbAssets = computed(() => {
 const cmdbActiveCount = computed(() => cmdbAssets.value.filter(asset => asset.status === 'ACTIVE').length)
 const cmdbCriticalCount = computed(() => cmdbAssets.value.filter(asset => ['CRITICAL', 'HIGH'].includes(asset.criticality) && asset.status !== 'RETIRED').length)
 const availableTicketAssets = computed(() => cmdbAssets.value.filter(asset => asset.status !== 'RETIRED' && !ticketAssetLinks.value.some(link => String(link.assetId) === String(asset.id))))
-const pageEyebrow = computed(() => ({ overview: 'OVERVIEW', workbench: 'UNIFIED OPERATIONS', supportGroups: 'TEAM ROUTING', tickets: 'TICKETS', satisfaction: 'CUSTOMER SATISFACTION', catalog: 'SERVICE CATALOG', changes: 'CHANGE MANAGEMENT', releases: 'RELEASE GOVERNANCE', runbooks: 'RUNBOOK ORCHESTRATION', problems: 'PROBLEM MANAGEMENT', alerts: 'OBSERVABILITY ALERTS', reliability: 'RELIABILITY ENGINEERING', statusPage: 'SERVICE STATUS', incidents: 'INCIDENT COMMAND', postmortems: 'POST-INCIDENT REVIEW', oncall: 'ON-CALL & ESCALATION', cmdb: 'CONFIGURATION MANAGEMENT', messages: 'ASYNC MESSAGE OPERATIONS', attachmentSecurity: 'QUARANTINE & MALWARE DEFENSE', integrations: 'INTEGRATION CENTER', team: 'TEAM ADMIN', knowledge: 'KNOWLEDGE BASE' })[activeView.value] || 'OPSFLOW')
-const pageTitle = computed(() => activeView.value === 'overview' ? '早上好，' + displayName.value : ({ workbench: '运营待办', supportGroups: '支持组队列', tickets: '工单中心', satisfaction: '服务评价与质量', catalog: '服务目录', changes: '变更管理', releases: '发布治理', runbooks: '运行手册', problems: '问题管理', alerts: '监控告警', reliability: '可靠性 SLO', statusPage: '服务状态', incidents: '事件指挥台', postmortems: '事件复盘', oncall: '值班与升级', cmdb: '资产与配置项', messages: '异步消息中心', attachmentSecurity: '附件安全中心', integrations: '集成中心', team: '团队管理', knowledge: '知识库' })[activeView.value] || 'OpsFlow')
+const pageEyebrow = computed(() => ({ overview: 'OVERVIEW', workbench: 'UNIFIED OPERATIONS', supportGroups: 'TEAM ROUTING', tickets: 'TICKETS', satisfaction: 'CUSTOMER SATISFACTION', catalog: 'SERVICE CATALOG', changes: 'CHANGE MANAGEMENT', releases: 'RELEASE GOVERNANCE', runbooks: 'RUNBOOK ORCHESTRATION', problems: 'PROBLEM MANAGEMENT', alerts: 'OBSERVABILITY ALERTS', reliability: 'RELIABILITY ENGINEERING', statusPage: 'SERVICE STATUS', incidents: 'INCIDENT COMMAND', postmortems: 'POST-INCIDENT REVIEW', oncall: 'ON-CALL & ESCALATION', cmdb: 'CONFIGURATION MANAGEMENT', messages: 'ASYNC MESSAGE OPERATIONS', attachmentSecurity: 'QUARANTINE & MALWARE DEFENSE', capacity: 'CAPACITY & RELEASE BASELINE', integrations: 'INTEGRATION CENTER', team: 'TEAM ADMIN', knowledge: 'KNOWLEDGE BASE' })[activeView.value] || 'OPSFLOW')
+const pageTitle = computed(() => activeView.value === 'overview' ? '早上好，' + displayName.value : ({ workbench: '运营待办', supportGroups: '支持组队列', tickets: '工单中心', satisfaction: '服务评价与质量', catalog: '服务目录', changes: '变更管理', releases: '发布治理', runbooks: '运行手册', problems: '问题管理', alerts: '监控告警', reliability: '可靠性 SLO', statusPage: '服务状态', incidents: '事件指挥台', postmortems: '事件复盘', oncall: '值班与升级', cmdb: '资产与配置项', messages: '异步消息中心', attachmentSecurity: '附件安全中心', capacity: '容量规划中心', integrations: '集成中心', team: '团队管理', knowledge: '知识库' })[activeView.value] || 'OpsFlow')
 const activeCount = computed(() => dashboardOverview.value?.active ?? tickets.value.filter(ticket => ['OPEN', 'IN_PROGRESS', 'WAITING_CONFIRMATION'].includes(ticket.status)).length)
 const urgentCount = computed(() => dashboardOverview.value?.urgent ?? tickets.value.filter(ticket => ticket.priority === 'URGENT').length)
 const resolvedCount = computed(() => dashboardOverview.value?.resolved ?? tickets.value.filter(ticket => ['RESOLVED', 'CLOSED'].includes(ticket.status)).length)
@@ -2665,6 +2667,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
           <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><b>▤</b>知识库<em>{{ articleTotal }}</em></button>
           <button v-if="isAdmin" :class="{ active: activeView === 'attachmentSecurity' }" @click="activeView = 'attachmentSecurity'"><b>⌾</b>附件安全</button>
           <button v-if="isAdmin" :class="{ active: activeView === 'messages' }" @click="activeView = 'messages'"><b>⇄</b>异步消息</button>
+          <button v-if="isAdmin" :class="{ active: activeView === 'capacity' }" @click="activeView = 'capacity'"><b>⌁</b>容量规划</button>
           <button v-if="isAdmin" :class="{ active: activeView === 'integrations' }" @click="activeView = 'integrations'"><b>⌁</b>集成中心<em v-if="webhookDeadCount">{{ webhookDeadCount }}</em></button>
           <button v-if="isAdmin" :class="{ active: activeView === 'team' }" @click="openTeam"><b>♙</b>团队管理<em>{{ teamUsers.length }}</em></button>
         </nav>
@@ -2689,6 +2692,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
 <SupportGroupCenter v-else-if="activeView === 'supportGroups'" :api="api" :staff-members="staffMembers" :is-admin="isAdmin" />
 <AttachmentSecurityCenter v-else-if="activeView === 'attachmentSecurity'" :api="api" />
 <AsyncMessageCenter v-else-if="activeView === 'messages'" :api="api" :download-csv="downloadCsv" />
+<CapacityPlanningCenter v-else-if="activeView === 'capacity'" :api="api" />
 <section v-else-if="activeView === 'tickets'" class="view-panel">
   <div class="section-toolbar">
     <div><p class="eyebrow">WORK QUEUE</p><h2>工作队列</h2></div>

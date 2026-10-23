@@ -180,6 +180,20 @@ opsflow:
       max-entries: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_ENTRIES:2000}
       max-expanded-bytes: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_EXPANDED_BYTES:104857600}
       max-ratio: ${OPSFLOW_ATTACHMENT_ARCHIVE_MAX_RATIO:100}
+  capacity:
+    app-version: ${OPSFLOW_APP_VERSION:local}
+    capture-interval-ms: ${OPSFLOW_CAPACITY_CAPTURE_INTERVAL_MS:3600000}
+    initial-delay-ms: ${OPSFLOW_CAPACITY_INITIAL_DELAY_MS:30000}
+    retention-days: ${OPSFLOW_CAPACITY_RETENTION_DAYS:180}
+    thresholds:
+      active-tickets: ${OPSFLOW_CAPACITY_ACTIVE_TICKETS:5000}
+      overdue-tickets: ${OPSFLOW_CAPACITY_OVERDUE_TICKETS:500}
+      active-incidents: ${OPSFLOW_CAPACITY_ACTIVE_INCIDENTS:20}
+      firing-alerts: ${OPSFLOW_CAPACITY_FIRING_ALERTS:100}
+      async-backlog: ${OPSFLOW_CAPACITY_ASYNC_BACKLOG:1000}
+      attachment-backlog: ${OPSFLOW_CAPACITY_ATTACHMENT_BACKLOG:500}
+      attachment-bytes: ${OPSFLOW_CAPACITY_ATTACHMENT_BYTES:5368709120}
+      database-bytes: ${OPSFLOW_CAPACITY_DATABASE_BYTES:10737418240}
   storage:
     upload-dir: ${OPSFLOW_UPLOAD_DIR:/app/uploads}
     max-file-size: ${OPSFLOW_MAX_UPLOAD_BYTES:10485760}
