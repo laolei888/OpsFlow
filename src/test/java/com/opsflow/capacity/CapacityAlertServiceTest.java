@@ -134,7 +134,7 @@ class CapacityAlertServiceTest {
         maintenance.setName("数据库扩容");
         maintenance.setReason("计划内容量调整");
         when(maintenanceWindowService.active(eq(3L), any(LocalDateTime.class)))
-                .thenReturn(maintenance, null);
+                .thenReturn(maintenance, (CapacityMaintenanceWindow) null);
         when(snapshotMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         doAnswer(invocation -> {

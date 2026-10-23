@@ -82,10 +82,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV44() throws SQLException {
+    void appliesEveryMigrationThroughV45() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("44", flyway.info().current().getVersion().getVersion());
-        assertEquals(44, flyway.info().applied().length);
+        assertEquals("45", flyway.info().current().getVersion().getVersion());
+        assertEquals(45, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
@@ -105,6 +105,28 @@ class DatabaseMigrationIT {
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertEquals(5, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = DATABASE()
+                       AND table_name IN ('capacity_policies', 'capacity_maintenance_windows')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(2, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'capacity_alerts'
+                       AND column_name IN ('policy_id', 'notification_suppressed',
+                                           'suppressed_notification_count', 'suppressed_by_window_id',
+                                           'suppressed_reason', 'last_suppressed_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(6, result.getInt(1));
         }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
