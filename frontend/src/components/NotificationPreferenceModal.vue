@@ -22,7 +22,8 @@ const eventOptions = [
   ['SERVICE_APPROVAL_REQUIRED', '服务申请待审批'], ['SERVICE_REQUEST_RESULT', '服务申请结果'],
   ['PROBLEM_CREATED', '问题单创建'], ['PROBLEM_STATUS_CHANGED', '问题单状态'],
   ['POSTMORTEM_REVIEW_REQUIRED', '复盘待评审'], ['POSTMORTEM_PUBLISHED', '复盘已发布'],
-  ['ONCALL_ESCALATION', '值班升级'], ['REPORT_READY', '报表生成']
+  ['ONCALL_ESCALATION', '值班升级'], ['CAPACITY_THRESHOLD', '容量风险预警'],
+  ['REPORT_READY', '报表生成']
 ]
 const hasEmailRule = computed(() => form.value.rules.some(rule => rule.emailEnabled))
 const hasWebhookRule = computed(() => form.value.rules.some(rule => rule.webhookEnabled))

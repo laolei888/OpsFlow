@@ -77,7 +77,7 @@
 - 通知按 tenantId 与 recipientId 隔离，并通过 dedupeKey 避免重复提醒
 - 附件安全中心：所有新附件先写入租户隔离区并进入异步扫描状态机，完成 SHA-256 取证、EICAR/可执行文件特征检查、压缩包路径穿越与高压缩比防护后才移动到安全区；可选接入 ClamAV INSTREAM 协议进行完整病毒扫描
 - 扫描中的附件禁止预览和下载，感染与终态失败文件持续保留在隔离区；管理员可查看扫描引擎、结论、哈希、重试次数与积压摘要，填写原因后重新扫描，或输入完整 SHA-256 执行带审计的高风险人工放行
-- 容量规划与版本基线：后台按租户定时采集工单吞吐、SLA 逾期、事件告警、异步消息、附件扫描、存储与 JVM 内存快照；管理员可创建普通快照或关联发布单的长期基线，查看 7-180 天趋势、阈值利用率、线性触顶预测，并逐项比较两个版本的改善与退化
+- 容量规划与治理闭环：后台按租户定时采集工单吞吐、SLA 逾期、事件告警、异步消息、附件扫描、存储与 JVM 内存快照；管理员可创建普通快照或关联发布单的长期基线，查看 7-180 天趋势、阈值利用率、线性触顶预测，并逐项比较两个版本的改善与退化；达到 80% 利用率、预计 30 天内触顶或已经越线时自动创建容量预警，支持风险升级通知、确认、人工解决、指标恢复自动关闭和全链路审计
 - 工单附件上传、列表和删除继续支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件；图片预览复用带 JWT 的安全下载链路
 - ADMIN 团队管理：创建账号、启停用、角色调整，并保护最后一名管理员
 - ADMIN 全局审计日志检索：按动作、操作者和时间范围筛选
@@ -124,7 +124,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 217 个业务单元测试，不依赖 Docker
+# 223 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -148,7 +148,7 @@ node quality/observability-smoke.mjs
 docker compose --profile quality run --rm --no-deps k6
 ```
 
-`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V43 的全部 Flyway
+`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V44 的全部 Flyway
 迁移、CSAT 唯一约束和数据库聚合查询。Windows 本地环境若无法访问 Docker 命名管道，
 也可以通过 `OPSFLOW_IT_JDBC_URL`、`OPSFLOW_IT_DB_USERNAME` 和
 `OPSFLOW_IT_DB_PASSWORD` 指向一个独立测试数据库；不要连接生产库。
@@ -420,8 +420,12 @@ CMDB 资产与配置项接口：
     GET  /api/v1/admin/capacity/report?days=30
     POST /api/v1/admin/capacity/snapshots
     GET  /api/v1/admin/capacity/comparison?baselineId=1&currentId=2
+    GET  /api/v1/admin/capacity/alerts?status=OPEN&level=CRITICAL
+    GET  /api/v1/admin/capacity/alerts/summary
+    POST /api/v1/admin/capacity/alerts/{id}/acknowledge
+    POST /api/v1/admin/capacity/alerts/{id}/resolve
 
-系统默认每小时为所有存在活跃用户的租户采集一次快照，普通快照保留 180 天，关联发布单的 `RELEASE_BASELINE` 不参与自动清理。可通过 `OPSFLOW_APP_VERSION` 标记部署版本，并使用 `OPSFLOW_CAPACITY_*` 环境变量调整采样周期、保留时间与预警阈值。
+系统默认每小时为所有存在活跃用户的租户采集一次快照并评估容量风险，普通快照保留 180 天，关联发布单的 `RELEASE_BASELINE` 不参与自动清理。每个租户、每项指标只保留一条活跃预警，风险升级后会重新打开已经确认的预警并通过异步消息通知管理员；指标恢复安全范围后自动关闭。可通过 `OPSFLOW_APP_VERSION` 标记部署版本，并使用 `OPSFLOW_CAPACITY_*` 环境变量调整采样周期、保留时间与预警阈值。
 
 运行手册接口：
 
@@ -577,7 +581,7 @@ curl http://localhost:8081/actuator/health
 
 ## 后续迭代计划
 
-1. 基于当前 Prometheus 历史数据增加持续容量趋势报告和版本对比
+1. 增加按租户配置的容量阈值策略、维护窗口抑制与历史风险报表
 2. 增加企业微信适配器与通知模板版本管理
 3. 增加 SSO/OIDC 与更细粒度的权限策略
 4. 增加对象存储直传、分片上传和隔离文件生命周期策略

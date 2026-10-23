@@ -1,6 +1,7 @@
 package com.opsflow.capacity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -22,7 +23,9 @@ public class CapacitySnapshot {
     private Long totalTickets;
     private Long activeTickets;
     private Long overdueTickets;
+    @TableField("tickets_created_24h")
     private Long ticketsCreated24h;
+    @TableField("tickets_resolved_24h")
     private Long ticketsResolved24h;
     private Long publishedArticles;
     private Long activeAssets;

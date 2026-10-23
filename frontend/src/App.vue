@@ -312,7 +312,9 @@ Object.assign(auditLabels, {
   RUNBOOK_ALERT_MATCHER_CREATED: '创建告警运行手册推荐规则', RUNBOOK_ALERT_MATCHER_UPDATED: '更新告警运行手册推荐规则',
   ASYNC_MESSAGE_RETRY: '重放异步消息', DEAD_LETTER_REQUEUED: '重新入队死信消息',
   DEAD_LETTER_DISCARDED: '作废死信消息', DEAD_LETTER_EXPORTED: '导出死信记录',
-  CAPACITY_SNAPSHOT_CREATED: '创建容量快照',
+  CAPACITY_SNAPSHOT_CREATED: '创建容量快照', CAPACITY_ALERT_CREATED: '创建容量预警',
+  CAPACITY_ALERT_ESCALATED: '升级容量预警', CAPACITY_ALERT_ACKNOWLEDGED: '确认容量预警',
+  CAPACITY_ALERT_RESOLVED: '解决容量预警', CAPACITY_ALERT_AUTO_RESOLVED: '自动关闭容量预警',
   NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递'
 })
 const auditActionOptions = [
@@ -408,6 +410,12 @@ const auditActionOptions = [
   { value: 'DEAD_LETTER_REQUEUED', label: '重新入队死信消息' },
   { value: 'DEAD_LETTER_DISCARDED', label: '作废死信消息' },
   { value: 'DEAD_LETTER_EXPORTED', label: '导出死信记录' },
+  { value: 'CAPACITY_SNAPSHOT_CREATED', label: '创建容量快照' },
+  { value: 'CAPACITY_ALERT_CREATED', label: '创建容量预警' },
+  { value: 'CAPACITY_ALERT_ESCALATED', label: '升级容量预警' },
+  { value: 'CAPACITY_ALERT_ACKNOWLEDGED', label: '确认容量预警' },
+  { value: 'CAPACITY_ALERT_RESOLVED', label: '解决容量预警' },
+  { value: 'CAPACITY_ALERT_AUTO_RESOLVED', label: '自动关闭容量预警' },
   { value: 'NOTIFICATION_PREFERENCES_UPDATED', label: '更新通知偏好' },
   { value: 'NOTIFICATION_DELIVERY_RETRY', label: '重试通知投递' }
 ]

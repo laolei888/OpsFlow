@@ -28,6 +28,7 @@ public class CapacityPlanningService {
     private final ReleasePlanMapper releasePlanMapper;
     private final AuditLogService auditLogService;
     private final CapacityProperties properties;
+    private final CapacityAlertService capacityAlertService;
 
     @Transactional
     public CapacitySnapshot captureManual(CaptureCommand command, Long tenantId, Long actorId) {
@@ -120,6 +121,7 @@ public class CapacityPlanningService {
         snapshot.setCreatedBy(actorId);
         snapshot.setCreatedAt(now);
         snapshotMapper.insert(snapshot);
+        capacityAlertService.evaluate(snapshot);
         return snapshot;
     }
 

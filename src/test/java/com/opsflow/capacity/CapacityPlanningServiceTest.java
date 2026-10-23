@@ -29,6 +29,7 @@ class CapacityPlanningServiceTest {
     @Mock private CapacitySnapshotCollector collector;
     @Mock private ReleasePlanMapper releasePlanMapper;
     @Mock private AuditLogService auditLogService;
+    @Mock private CapacityAlertService capacityAlertService;
 
     private CapacityPlanningService service;
 
@@ -36,7 +37,8 @@ class CapacityPlanningServiceTest {
     void setUp() {
         CapacityProperties properties = new CapacityProperties();
         properties.setAppVersion("test-1.0.0");
-        service = new CapacityPlanningService(snapshotMapper, collector, releasePlanMapper, auditLogService, properties);
+        service = new CapacityPlanningService(snapshotMapper, collector, releasePlanMapper, auditLogService,
+                properties, capacityAlertService);
     }
 
     @Test
@@ -54,6 +56,7 @@ class CapacityPlanningServiceTest {
         assertThat(result.getCaptureType()).isEqualTo(CapacityCaptureType.MANUAL);
         assertThat(result.getActiveTickets()).isEqualTo(25L);
         assertThat(result.getDatabaseBytes()).isEqualTo(8_000L);
+        verify(capacityAlertService).evaluate(result);
         verify(auditLogService).record(eq(3L), eq(9L), eq("CAPACITY_SNAPSHOT"), eq(91L),
                 eq("CAPACITY_SNAPSHOT_CREATED"), eq(null), eq(result), any(String.class));
     }
