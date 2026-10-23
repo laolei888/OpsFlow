@@ -77,7 +77,7 @@
 - 通知按 tenantId 与 recipientId 隔离，并通过 dedupeKey 避免重复提醒
 - 附件安全中心：所有新附件先写入租户隔离区并进入异步扫描状态机，完成 SHA-256 取证、EICAR/可执行文件特征检查、压缩包路径穿越与高压缩比防护后才移动到安全区；可选接入 ClamAV INSTREAM 协议进行完整病毒扫描
 - 扫描中的附件禁止预览和下载，感染与终态失败文件持续保留在隔离区；管理员可查看扫描引擎、结论、哈希、重试次数与积压摘要，填写原因后重新扫描，或输入完整 SHA-256 执行带审计的高风险人工放行
-- 容量规划与治理闭环：后台按租户定时采集工单吞吐、SLA 逾期、事件告警、异步消息、附件扫描、存储与 JVM 内存快照；管理员可创建普通快照或关联发布单的长期基线，查看 7-180 天趋势、阈值利用率、线性触顶预测，并逐项比较两个版本的改善与退化；达到 80% 利用率、预计 30 天内触顶或已经越线时自动创建容量预警，支持风险升级通知、确认、人工解决、指标恢复自动关闭和全链路审计
+- 容量规划与治理闭环：后台按租户定时采集工单吞吐、SLA 逾期、事件告警、异步消息、附件扫描、存储与 JVM 内存快照；管理员可创建普通快照或关联发布单的长期基线，查看 7-180 天趋势、阈值利用率、线性触顶预测，并逐项比较两个版本的改善与退化；支持租户级八项容量阈值、预警水位和观察周期配置，自动创建/升级/恢复容量预警；维护窗口内保留风险证据但抑制通知，窗口结束后对未确认风险补发提醒，并通过历史风险画像持续统计解决率、平均解决时长与高频风险指标
 - 工单附件上传、列表和删除继续支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件；图片预览复用带 JWT 的安全下载链路
 - ADMIN 团队管理：创建账号、启停用、角色调整，并保护最后一名管理员
 - ADMIN 全局审计日志检索：按动作、操作者和时间范围筛选
@@ -422,10 +422,17 @@ CMDB 资产与配置项接口：
     GET  /api/v1/admin/capacity/comparison?baselineId=1&currentId=2
     GET  /api/v1/admin/capacity/alerts?status=OPEN&level=CRITICAL
     GET  /api/v1/admin/capacity/alerts/summary
+    GET  /api/v1/admin/capacity/alerts/history?days=30
     POST /api/v1/admin/capacity/alerts/{id}/acknowledge
     POST /api/v1/admin/capacity/alerts/{id}/resolve
+    GET  /api/v1/admin/capacity/policy
+    PUT  /api/v1/admin/capacity/policy
+    GET  /api/v1/admin/capacity/maintenance-windows
+    POST /api/v1/admin/capacity/maintenance-windows
+    PUT  /api/v1/admin/capacity/maintenance-windows/{id}
+    DELETE /api/v1/admin/capacity/maintenance-windows/{id}
 
-系统默认每小时为所有存在活跃用户的租户采集一次快照并评估容量风险，普通快照保留 180 天，关联发布单的 `RELEASE_BASELINE` 不参与自动清理。每个租户、每项指标只保留一条活跃预警，风险升级后会重新打开已经确认的预警并通过异步消息通知管理员；指标恢复安全范围后自动关闭。可通过 `OPSFLOW_APP_VERSION` 标记部署版本，并使用 `OPSFLOW_CAPACITY_*` 环境变量调整采样周期、保留时间与预警阈值。
+系统默认每小时为所有存在活跃用户的租户采集一次快照并评估容量风险，普通快照保留 180 天，关联发布单的 `RELEASE_BASELINE` 不参与自动清理。租户没有自定义策略时继承 `OPSFLOW_CAPACITY_*` 平台默认阈值；保存策略后，报表预测与告警评估统一使用租户阈值，单项阈值为 0 可关闭该指标。每个租户、每项指标只保留一条活跃预警，风险升级后会重新打开已经确认的预警；处于维护窗口时通知被抑制并写入审计，窗口结束后未确认风险恢复通知，指标回到安全范围后自动关闭。
 
 运行手册接口：
 

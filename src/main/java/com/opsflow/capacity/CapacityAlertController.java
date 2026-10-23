@@ -40,6 +40,14 @@ public class CapacityAlertController {
         return ApiResponse.ok(alertService.summary(principal.tenantId()));
     }
 
+    @GetMapping("/history")
+    public ApiResponse<CapacityAlertService.AlertHistoryReport> history(
+            @RequestParam(required = false) Integer days,
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(alertService.history(principal.tenantId(), days));
+    }
+
     @PostMapping("/{id}/acknowledge")
     public ApiResponse<CapacityAlert> acknowledge(@PathVariable Long id,
                                                    @Valid @RequestBody(required = false) AcknowledgeRequest request,

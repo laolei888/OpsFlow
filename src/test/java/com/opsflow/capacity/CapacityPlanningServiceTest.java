@@ -30,6 +30,7 @@ class CapacityPlanningServiceTest {
     @Mock private ReleasePlanMapper releasePlanMapper;
     @Mock private AuditLogService auditLogService;
     @Mock private CapacityAlertService capacityAlertService;
+    @Mock private CapacityPolicyService policyService;
 
     private CapacityPlanningService service;
 
@@ -38,7 +39,7 @@ class CapacityPlanningServiceTest {
         CapacityProperties properties = new CapacityProperties();
         properties.setAppVersion("test-1.0.0");
         service = new CapacityPlanningService(snapshotMapper, collector, releasePlanMapper, auditLogService,
-                properties, capacityAlertService);
+                properties, capacityAlertService, policyService);
     }
 
     @Test
@@ -81,6 +82,7 @@ class CapacityPlanningServiceTest {
 
     @Test
     void reportCalculatesGrowthThresholdAndForecast() {
+        when(policyService.effective(3L)).thenReturn(defaultPolicy());
         LocalDateTime now = LocalDateTime.now();
         CapacitySnapshot first = snapshot(1L, now.minusDays(10), 1_000, 100, 30, 20);
         CapacitySnapshot latest = snapshot(2L, now, 4_000, 450, 80, 60);
@@ -100,6 +102,7 @@ class CapacityPlanningServiceTest {
 
     @Test
     void comparisonClassifiesImprovementAndRejectsSameSnapshot() {
+        when(policyService.effective(3L)).thenReturn(defaultPolicy());
         LocalDateTime now = LocalDateTime.now();
         CapacitySnapshot baseline = snapshot(1L, now.minusDays(1), 100, 20, 15, 40);
         CapacitySnapshot current = snapshot(2L, now, 90, 10, 25, 20);
@@ -146,5 +149,11 @@ class CapacityPlanningServiceTest {
         snapshot.setHeapUsedBytes(1_000L);
         snapshot.setHeapMaxBytes(10_000L);
         return snapshot;
+    }
+
+    private CapacityPolicyService.EffectivePolicy defaultPolicy() {
+        return new CapacityPolicyService.EffectivePolicy(null, 3L, 5_000, 500, 20, 100,
+                1_000, 500, 5_368_709_120L, 10_737_418_240L,
+                80, 30, true, true, null);
     }
 }

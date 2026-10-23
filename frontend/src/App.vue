@@ -315,6 +315,9 @@ Object.assign(auditLabels, {
   CAPACITY_SNAPSHOT_CREATED: '创建容量快照', CAPACITY_ALERT_CREATED: '创建容量预警',
   CAPACITY_ALERT_ESCALATED: '升级容量预警', CAPACITY_ALERT_ACKNOWLEDGED: '确认容量预警',
   CAPACITY_ALERT_RESOLVED: '解决容量预警', CAPACITY_ALERT_AUTO_RESOLVED: '自动关闭容量预警',
+  CAPACITY_ALERT_NOTIFICATION_SUPPRESSED: '抑制容量预警通知', CAPACITY_ALERT_NOTIFICATION_RELEASED: '恢复容量预警通知',
+  CAPACITY_POLICY_UPDATED: '更新容量策略', CAPACITY_MAINTENANCE_CREATED: '创建容量维护窗口',
+  CAPACITY_MAINTENANCE_UPDATED: '更新容量维护窗口', CAPACITY_MAINTENANCE_DELETED: '删除容量维护窗口',
   NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递'
 })
 const auditActionOptions = [
@@ -416,6 +419,12 @@ const auditActionOptions = [
   { value: 'CAPACITY_ALERT_ACKNOWLEDGED', label: '确认容量预警' },
   { value: 'CAPACITY_ALERT_RESOLVED', label: '解决容量预警' },
   { value: 'CAPACITY_ALERT_AUTO_RESOLVED', label: '自动关闭容量预警' },
+  { value: 'CAPACITY_ALERT_NOTIFICATION_SUPPRESSED', label: '抑制容量预警通知' },
+  { value: 'CAPACITY_ALERT_NOTIFICATION_RELEASED', label: '恢复容量预警通知' },
+  { value: 'CAPACITY_POLICY_UPDATED', label: '更新容量策略' },
+  { value: 'CAPACITY_MAINTENANCE_CREATED', label: '创建容量维护窗口' },
+  { value: 'CAPACITY_MAINTENANCE_UPDATED', label: '更新容量维护窗口' },
+  { value: 'CAPACITY_MAINTENANCE_DELETED', label: '删除容量维护窗口' },
   { value: 'NOTIFICATION_PREFERENCES_UPDATED', label: '更新通知偏好' },
   { value: 'NOTIFICATION_DELIVERY_RETRY', label: '重试通知投递' }
 ]

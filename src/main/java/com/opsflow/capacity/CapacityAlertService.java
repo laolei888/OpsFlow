@@ -12,9 +12,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.ToLongFunction;
 
@@ -23,20 +26,23 @@ import java.util.function.ToLongFunction;
 public class CapacityAlertService {
     private final CapacityAlertMapper alertMapper;
     private final CapacitySnapshotMapper snapshotMapper;
-    private final CapacityProperties properties;
+    private final CapacityPolicyService policyService;
+    private final CapacityMaintenanceWindowService maintenanceWindowService;
     private final AuthService authService;
     private final AsyncNotificationPublisher notificationPublisher;
     private final AuditLogService auditLogService;
 
     @Transactional
     public void evaluate(CapacitySnapshot snapshot) {
+        CapacityPolicyService.EffectivePolicy policy = policyService.effective(snapshot.getTenantId());
+        CapacityMaintenanceWindow maintenance = maintenanceWindowService.active(snapshot.getTenantId(), LocalDateTime.now());
         CapacitySnapshot previous = snapshotMapper.selectOne(new LambdaQueryWrapper<CapacitySnapshot>()
                 .eq(CapacitySnapshot::getTenantId, snapshot.getTenantId())
                 .lt(CapacitySnapshot::getCapturedAt, snapshot.getCapturedAt())
                 .orderByDesc(CapacitySnapshot::getCapturedAt)
                 .orderByDesc(CapacitySnapshot::getId)
                 .last("LIMIT 1"));
-        for (AlertMetric metric : metrics()) evaluateMetric(snapshot, previous, metric);
+        for (AlertMetric metric : metrics(policy)) evaluateMetric(snapshot, previous, metric, policy, maintenance);
     }
 
     public List<CapacityAlert> list(Long tenantId, CapacityAlertStatus status,
@@ -64,6 +70,37 @@ public class CapacityAlertService {
                 alerts.stream().map(CapacityAlert::getFirstDetectedAt).min(LocalDateTime::compareTo).orElse(null));
     }
 
+    public AlertHistoryReport history(Long tenantId, Integer requestedDays) {
+        int days = requestedDays == null ? 30 : Math.max(7, Math.min(requestedDays, 365));
+        LocalDateTime since = LocalDateTime.now().minusDays(days);
+        List<CapacityAlert> alerts = alertMapper.selectList(new LambdaQueryWrapper<CapacityAlert>()
+                .eq(CapacityAlert::getTenantId, tenantId)
+                .ge(CapacityAlert::getCreatedAt, since)
+                .orderByAsc(CapacityAlert::getCreatedAt));
+        long resolved = alerts.stream().filter(alert -> alert.getStatus() == CapacityAlertStatus.RESOLVED).count();
+        long suppressed = alerts.stream().filter(alert -> value(alert.getSuppressedNotificationCount()) > 0).count();
+        double resolutionHours = alerts.stream()
+                .filter(alert -> alert.getResolvedAt() != null && alert.getFirstDetectedAt() != null)
+                .mapToLong(alert -> Duration.between(alert.getFirstDetectedAt(), alert.getResolvedAt()).toMinutes())
+                .average().orElse(0) / 60.0;
+
+        Map<LocalDate, MutableDaily> daily = new LinkedHashMap<>();
+        for (int offset = days - 1; offset >= 0; offset--) {
+            LocalDate date = LocalDate.now().minusDays(offset);
+            daily.put(date, new MutableDaily(date));
+        }
+        Map<String, MutableMetric> metrics = new LinkedHashMap<>();
+        for (CapacityAlert alert : alerts) {
+            MutableDaily bucket = daily.get(alert.getCreatedAt().toLocalDate());
+            if (bucket != null) bucket.add(alert);
+            metrics.computeIfAbsent(alert.getMetricKey(), key -> new MutableMetric(key, alert.getMetricLabel())).add(alert);
+        }
+        return new AlertHistoryReport(days, alerts.size(), resolved, suppressed,
+                percent(resolved, alerts.size()), decimal(resolutionHours),
+                daily.values().stream().map(MutableDaily::view).toList(),
+                metrics.values().stream().map(MutableMetric::view).toList());
+    }
+
     @Transactional
     public CapacityAlert acknowledge(Long id, String note, Long tenantId, Long actorId) {
         CapacityAlert alert = required(id, tenantId);
@@ -75,6 +112,7 @@ public class CapacityAlertService {
         alert.setAcknowledgedBy(actorId);
         alert.setAcknowledgedAt(LocalDateTime.now());
         alert.setAcknowledgementNote(optional(note, "确认说明"));
+        clearSuppression(alert);
         alert.setUpdatedAt(LocalDateTime.now());
         alertMapper.updateById(alert);
         auditLogService.record(tenantId, actorId, "CAPACITY_ALERT", id, "CAPACITY_ALERT_ACKNOWLEDGED",
@@ -94,6 +132,7 @@ public class CapacityAlertService {
         alert.setResolvedAt(now);
         alert.setResolutionNote(normalizedNote);
         alert.setActiveKey(null);
+        clearSuppression(alert);
         alert.setUpdatedAt(now);
         alertMapper.updateById(alert);
         auditLogService.record(tenantId, actorId, "CAPACITY_ALERT", id, "CAPACITY_ALERT_RESOLVED",
@@ -101,10 +140,12 @@ public class CapacityAlertService {
         return alert;
     }
 
-    private void evaluateMetric(CapacitySnapshot snapshot, CapacitySnapshot previous, AlertMetric metric) {
+    private void evaluateMetric(CapacitySnapshot snapshot, CapacitySnapshot previous, AlertMetric metric,
+                                CapacityPolicyService.EffectivePolicy policy,
+                                CapacityMaintenanceWindow maintenance) {
         long current = metric.reader().applyAsLong(snapshot);
         Growth growth = growth(metric, snapshot, previous);
-        CapacityAlertLevel level = determineLevel(current, metric.threshold(), growth.projectedDays());
+        CapacityAlertLevel level = determineLevel(current, metric.threshold(), growth.projectedDays(), policy);
         String activeKey = snapshot.getTenantId() + ":" + metric.key();
         CapacityAlert existing = alertMapper.selectOne(new LambdaQueryWrapper<CapacityAlert>()
                 .eq(CapacityAlert::getActiveKey, activeKey).last("LIMIT 1"));
@@ -112,12 +153,14 @@ public class CapacityAlertService {
             if (existing != null) autoResolve(existing, snapshot, metric, current, growth);
             return;
         }
-        if (existing == null) create(snapshot, metric, current, growth, level, activeKey);
-        else update(existing, snapshot, metric, current, growth, level);
+        if (existing == null) create(snapshot, metric, current, growth, level, activeKey, policy, maintenance);
+        else update(existing, snapshot, metric, current, growth, level, policy, maintenance);
     }
 
     private void create(CapacitySnapshot snapshot, AlertMetric metric, long current, Growth growth,
-                        CapacityAlertLevel level, String activeKey) {
+                        CapacityAlertLevel level, String activeKey,
+                        CapacityPolicyService.EffectivePolicy policy,
+                        CapacityMaintenanceWindow maintenance) {
         LocalDateTime now = LocalDateTime.now();
         CapacityAlert alert = new CapacityAlert();
         alert.setTenantId(snapshot.getTenantId());
@@ -128,7 +171,11 @@ public class CapacityAlertService {
         alert.setLevel(level);
         alert.setStatus(CapacityAlertStatus.OPEN);
         applyMeasurement(alert, snapshot, metric, current, growth);
+        alert.setPolicyId(policy.id());
         alert.setOccurrenceCount(1);
+        alert.setNotificationSuppressed(false);
+        alert.setSuppressedNotificationCount(0);
+        if (maintenance != null) applySuppression(alert, maintenance);
         alert.setFirstDetectedAt(now);
         alert.setLastDetectedAt(now);
         alert.setActiveKey(activeKey);
@@ -137,15 +184,20 @@ public class CapacityAlertService {
         alertMapper.insert(alert);
         auditLogService.record(snapshot.getTenantId(), null, "CAPACITY_ALERT", alert.getId(),
                 "CAPACITY_ALERT_CREATED", null, alert, alertDetail(alert));
-        notifyAdmins(alert);
+        if (maintenance == null) notifyAdmins(alert);
+        else auditSuppressed(alert, maintenance);
     }
 
     private void update(CapacityAlert alert, CapacitySnapshot snapshot, AlertMetric metric, long current,
-                        Growth growth, CapacityAlertLevel level) {
+                        Growth growth, CapacityAlertLevel level,
+                        CapacityPolicyService.EffectivePolicy policy,
+                        CapacityMaintenanceWindow maintenance) {
         CapacityAlertLevel beforeLevel = alert.getLevel();
         CapacityAlertStatus beforeStatus = alert.getStatus();
+        boolean wasSuppressed = Boolean.TRUE.equals(alert.getNotificationSuppressed());
         boolean escalated = rank(level) > rank(beforeLevel);
         applyMeasurement(alert, snapshot, metric, current, growth);
+        alert.setPolicyId(policy.id());
         alert.setLevel(level);
         alert.setOccurrenceCount((alert.getOccurrenceCount() == null ? 0 : alert.getOccurrenceCount()) + 1);
         alert.setLastDetectedAt(LocalDateTime.now());
@@ -156,11 +208,20 @@ public class CapacityAlertService {
             alert.setAcknowledgedAt(null);
             alert.setAcknowledgementNote(null);
         }
+        boolean released = !escalated && wasSuppressed && maintenance == null;
+        if (escalated && maintenance != null) applySuppression(alert, maintenance);
+        else if ((escalated && maintenance == null) || released) clearSuppression(alert);
         alertMapper.updateById(alert);
         if (escalated) {
             auditLogService.record(snapshot.getTenantId(), null, "CAPACITY_ALERT", alert.getId(),
                     "CAPACITY_ALERT_ESCALATED", beforeLevel, level, alertDetail(alert));
-            notifyAdmins(alert);
+            if (maintenance == null) notifyAdmins(alert);
+            else auditSuppressed(alert, maintenance);
+        } else if (released) {
+            auditLogService.record(snapshot.getTenantId(), null, "CAPACITY_ALERT", alert.getId(),
+                    "CAPACITY_ALERT_NOTIFICATION_RELEASED", true, false,
+                    "维护窗口结束，恢复容量预警通知：" + alert.getMetricLabel());
+            if (alert.getStatus() == CapacityAlertStatus.OPEN) notifyAdmins(alert);
         }
     }
 
@@ -173,6 +234,7 @@ public class CapacityAlertService {
         alert.setResolvedAt(now);
         alert.setResolutionNote("指标已恢复到安全范围");
         alert.setActiveKey(null);
+        clearSuppression(alert);
         alert.setUpdatedAt(now);
         alertMapper.updateById(alert);
         auditLogService.record(snapshot.getTenantId(), null, "CAPACITY_ALERT", alert.getId(),
@@ -204,12 +266,34 @@ public class CapacityAlertService {
         return new Growth(daily, projected);
     }
 
-    private CapacityAlertLevel determineLevel(long current, long threshold, Long projectedDays) {
-        if (threshold <= 0) return null;
+    private CapacityAlertLevel determineLevel(long current, long threshold, Long projectedDays,
+                                              CapacityPolicyService.EffectivePolicy policy) {
+        if (!policy.enabled() || threshold <= 0) return null;
         if (current >= threshold) return CapacityAlertLevel.CRITICAL;
-        if (current >= threshold * 0.8) return CapacityAlertLevel.WARNING;
-        if (projectedDays != null && projectedDays <= 30) return CapacityAlertLevel.WATCH;
+        if (current * 100.0 / threshold >= policy.warningPercent()) return CapacityAlertLevel.WARNING;
+        if (projectedDays != null && projectedDays <= policy.watchDays()) return CapacityAlertLevel.WATCH;
         return null;
+    }
+
+    private void applySuppression(CapacityAlert alert, CapacityMaintenanceWindow maintenance) {
+        alert.setNotificationSuppressed(true);
+        alert.setSuppressedNotificationCount(value(alert.getSuppressedNotificationCount()) + 1);
+        alert.setSuppressedByWindowId(maintenance.getId());
+        String reason = maintenance.getName() + "：" + maintenance.getReason();
+        alert.setSuppressedReason(reason.length() > 500 ? reason.substring(0, 500) : reason);
+        alert.setLastSuppressedAt(LocalDateTime.now());
+    }
+
+    private void clearSuppression(CapacityAlert alert) {
+        alert.setNotificationSuppressed(false);
+        alert.setSuppressedByWindowId(null);
+        alert.setSuppressedReason(null);
+    }
+
+    private void auditSuppressed(CapacityAlert alert, CapacityMaintenanceWindow maintenance) {
+        auditLogService.record(alert.getTenantId(), null, "CAPACITY_ALERT", alert.getId(),
+                "CAPACITY_ALERT_NOTIFICATION_SUPPRESSED", null, maintenance.getId(),
+                "容量维护窗口内抑制通知：" + maintenance.getName());
     }
 
     private void notifyAdmins(CapacityAlert alert) {
@@ -232,17 +316,16 @@ public class CapacityAlertService {
         return alert;
     }
 
-    private List<AlertMetric> metrics() {
-        CapacityProperties.Thresholds thresholds = properties.getThresholds();
+    private List<AlertMetric> metrics(CapacityPolicyService.EffectivePolicy policy) {
         return List.of(
-                new AlertMetric("activeTickets", "活跃工单", thresholds.getActiveTickets(), CapacitySnapshot::getActiveTickets),
-                new AlertMetric("overdueTickets", "逾期工单", thresholds.getOverdueTickets(), CapacitySnapshot::getOverdueTickets),
-                new AlertMetric("activeIncidents", "活跃事件", thresholds.getActiveIncidents(), CapacitySnapshot::getActiveIncidents),
-                new AlertMetric("firingAlerts", "未恢复告警", thresholds.getFiringAlerts(), CapacitySnapshot::getFiringAlerts),
-                new AlertMetric("asyncBacklog", "异步消息积压", thresholds.getAsyncBacklog(), CapacitySnapshot::getAsyncBacklog),
-                new AlertMetric("attachmentBacklog", "附件扫描积压", thresholds.getAttachmentBacklog(), CapacitySnapshot::getAttachmentBacklog),
-                new AlertMetric("attachmentBytes", "附件存储", thresholds.getAttachmentBytes(), CapacitySnapshot::getAttachmentBytes),
-                new AlertMetric("databaseBytes", "数据库体积", thresholds.getDatabaseBytes(), CapacitySnapshot::getDatabaseBytes));
+                new AlertMetric("activeTickets", "活跃工单", policy.activeTicketsThreshold(), CapacitySnapshot::getActiveTickets),
+                new AlertMetric("overdueTickets", "逾期工单", policy.overdueTicketsThreshold(), CapacitySnapshot::getOverdueTickets),
+                new AlertMetric("activeIncidents", "活跃事件", policy.activeIncidentsThreshold(), CapacitySnapshot::getActiveIncidents),
+                new AlertMetric("firingAlerts", "未恢复告警", policy.firingAlertsThreshold(), CapacitySnapshot::getFiringAlerts),
+                new AlertMetric("asyncBacklog", "异步消息积压", policy.asyncBacklogThreshold(), CapacitySnapshot::getAsyncBacklog),
+                new AlertMetric("attachmentBacklog", "附件扫描积压", policy.attachmentBacklogThreshold(), CapacitySnapshot::getAttachmentBacklog),
+                new AlertMetric("attachmentBytes", "附件存储", policy.attachmentBytesThreshold(), CapacitySnapshot::getAttachmentBytes),
+                new AlertMetric("databaseBytes", "数据库体积", policy.databaseBytesThreshold(), CapacitySnapshot::getDatabaseBytes));
     }
 
     private int rank(CapacityAlertLevel level) {
@@ -251,6 +334,15 @@ public class CapacityAlertService {
 
     private BigDecimal decimal(double value) {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal percent(long part, long total) {
+        return total == 0 ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                : decimal(part * 100.0 / total);
+    }
+
+    private int value(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private String alertDetail(CapacityAlert alert) {
@@ -276,4 +368,45 @@ public class CapacityAlertService {
     private record Growth(double dailyGrowth, Long projectedDays) { }
     public record AlertSummary(long open, long acknowledged, long watch, long warning,
                                long critical, LocalDateTime oldestActiveAt) { }
+    public record AlertHistoryReport(int days, long totalAlerts, long resolvedAlerts, long suppressedAlerts,
+                                     BigDecimal resolutionRate, BigDecimal meanResolutionHours,
+                                     List<DailyHistory> daily, List<MetricHistory> metrics) { }
+    public record DailyHistory(LocalDate date, long created, long critical, long resolved, long suppressed) { }
+    public record MetricHistory(String key, String label, long total, long critical, long resolved,
+                                long suppressed) { }
+
+    private static final class MutableDaily {
+        private final LocalDate date;
+        private long created;
+        private long critical;
+        private long resolved;
+        private long suppressed;
+
+        private MutableDaily(LocalDate date) { this.date = date; }
+        private void add(CapacityAlert alert) {
+            created++;
+            if (alert.getLevel() == CapacityAlertLevel.CRITICAL) critical++;
+            if (alert.getStatus() == CapacityAlertStatus.RESOLVED) resolved++;
+            if (alert.getSuppressedNotificationCount() != null && alert.getSuppressedNotificationCount() > 0) suppressed++;
+        }
+        private DailyHistory view() { return new DailyHistory(date, created, critical, resolved, suppressed); }
+    }
+
+    private static final class MutableMetric {
+        private final String key;
+        private final String label;
+        private long total;
+        private long critical;
+        private long resolved;
+        private long suppressed;
+
+        private MutableMetric(String key, String label) { this.key = key; this.label = label; }
+        private void add(CapacityAlert alert) {
+            total++;
+            if (alert.getLevel() == CapacityAlertLevel.CRITICAL) critical++;
+            if (alert.getStatus() == CapacityAlertStatus.RESOLVED) resolved++;
+            if (alert.getSuppressedNotificationCount() != null && alert.getSuppressedNotificationCount() > 0) suppressed++;
+        }
+        private MetricHistory view() { return new MetricHistory(key, label, total, critical, resolved, suppressed); }
+    }
 }

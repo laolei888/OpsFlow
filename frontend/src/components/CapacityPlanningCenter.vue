@@ -6,6 +6,9 @@ const report = ref({ totalSnapshots: 0, latest: null, snapshots: [], trends: [] 
 const releases = ref([])
 const alerts = ref([])
 const alertSummary = ref({ open: 0, acknowledged: 0, watch: 0, warning: 0, critical: 0, oldestActiveAt: null })
+const policy = ref(null)
+const maintenanceWindows = ref([])
+const alertHistory = ref({ days: 30, totalAlerts: 0, resolvedAlerts: 0, suppressedAlerts: 0, resolutionRate: 0, meanResolutionHours: 0, daily: [], metrics: [] })
 const comparison = ref(null)
 const loading = ref(false)
 const comparing = ref(false)
@@ -24,6 +27,13 @@ const alertAction = ref('acknowledge')
 const alertNote = ref('')
 const showAlertAction = ref(false)
 const alertSaving = ref(false)
+const showPolicy = ref(false)
+const policySaving = ref(false)
+const policyForm = ref({})
+const showMaintenance = ref(false)
+const maintenanceSaving = ref(false)
+const editingMaintenanceId = ref(null)
+const maintenanceForm = ref({ name: '', startsAt: '', endsAt: '', reason: '', enabled: true })
 
 const levelLabels = { HEALTHY: '健康', WATCH: '需观察', WARNING: '预警', CRITICAL: '已超阈值', INFO: '信息' }
 const alertStatusLabels = { OPEN: '待处理', ACKNOWLEDGED: '已确认', RESOLVED: '已解决' }
@@ -43,27 +53,106 @@ const chartPoints = computed(() => {
   }))
 })
 const riskTrends = computed(() => (report.value.trends || []).filter(item => item.threshold != null))
+const activeMaintenance = computed(() => maintenanceWindows.value.find(item => item.enabled
+  && serverDate(item.startsAt).getTime() <= Date.now() && serverDate(item.endsAt).getTime() > Date.now()))
+const historyMax = computed(() => Math.max(1, ...(alertHistory.value.daily || []).map(item => Number(item.created || 0))))
 
 async function load(silent = false) {
   if (!silent) loading.value = true
   error.value = ''
   try {
     const statusQuery = alertStatus.value ? '?status=' + alertStatus.value : ''
-    const [nextReport, releaseCenter, nextAlerts, nextAlertSummary] = await Promise.all([
+    const [nextReport, releaseCenter, nextAlerts, nextAlertSummary, nextPolicy, nextWindows, nextHistory] = await Promise.all([
       props.api('/api/v1/admin/capacity/report?days=' + days.value),
       props.api('/api/v1/releases'),
       props.api('/api/v1/admin/capacity/alerts' + statusQuery),
-      props.api('/api/v1/admin/capacity/alerts/summary')
+      props.api('/api/v1/admin/capacity/alerts/summary'),
+      props.api('/api/v1/admin/capacity/policy'),
+      props.api('/api/v1/admin/capacity/maintenance-windows'),
+      props.api('/api/v1/admin/capacity/alerts/history?days=' + days.value)
     ])
     report.value = nextReport || { totalSnapshots: 0, latest: null, snapshots: [], trends: [] }
     releases.value = releaseCenter?.releases || []
     alerts.value = nextAlerts || []
     alertSummary.value = nextAlertSummary || alertSummary.value
+    policy.value = nextPolicy
+    maintenanceWindows.value = nextWindows || []
+    alertHistory.value = nextHistory || alertHistory.value
     chooseComparisonDefaults()
   } catch (exception) {
     error.value = exception.message || '容量规划数据加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+function openPolicyEditor() {
+  policyForm.value = { ...(policy.value || {}) }
+  showPolicy.value = true
+}
+
+async function savePolicy() {
+  policySaving.value = true
+  error.value = ''
+  try {
+    const payload = { ...policyForm.value }
+    delete payload.id
+    delete payload.tenantId
+    delete payload.inheritedDefaults
+    delete payload.updatedAt
+    policy.value = await props.api('/api/v1/admin/capacity/policy', { method: 'PUT', body: JSON.stringify(payload) })
+    showPolicy.value = false
+    notice.value = '容量策略已生效，后续采样会按新阈值评估风险'
+    window.setTimeout(() => { notice.value = '' }, 3500)
+    await load(true)
+  } catch (exception) {
+    error.value = exception.message || '保存容量策略失败'
+  } finally {
+    policySaving.value = false
+  }
+}
+
+function openMaintenanceEditor(item = null) {
+  editingMaintenanceId.value = item?.id || null
+  if (item) {
+    maintenanceForm.value = { name: item.name, startsAt: toLocalInput(item.startsAt), endsAt: toLocalInput(item.endsAt), reason: item.reason, enabled: item.enabled }
+  } else {
+    const start = new Date(Date.now() + 60 * 60 * 1000)
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000)
+    maintenanceForm.value = { name: '', startsAt: toLocalInput(start), endsAt: toLocalInput(end), reason: '', enabled: true }
+  }
+  showMaintenance.value = true
+}
+
+async function saveMaintenance() {
+  maintenanceSaving.value = true
+  error.value = ''
+  try {
+    const path = '/api/v1/admin/capacity/maintenance-windows' + (editingMaintenanceId.value ? '/' + editingMaintenanceId.value : '')
+    await props.api(path, {
+      method: editingMaintenanceId.value ? 'PUT' : 'POST',
+      body: JSON.stringify({ ...maintenanceForm.value, startsAt: localDateTime(maintenanceForm.value.startsAt), endsAt: localDateTime(maintenanceForm.value.endsAt) })
+    })
+    showMaintenance.value = false
+    notice.value = editingMaintenanceId.value ? '容量维护窗口已更新' : '容量维护窗口已创建'
+    window.setTimeout(() => { notice.value = '' }, 3500)
+    await load(true)
+  } catch (exception) {
+    error.value = exception.message || '保存容量维护窗口失败'
+  } finally {
+    maintenanceSaving.value = false
+  }
+}
+
+async function deleteMaintenance(item) {
+  if (!window.confirm('确认删除维护窗口“' + item.name + '”？')) return
+  error.value = ''
+  try {
+    await props.api('/api/v1/admin/capacity/maintenance-windows/' + item.id, { method: 'DELETE' })
+    notice.value = '容量维护窗口已删除'
+    await load(true)
+  } catch (exception) {
+    error.value = exception.message || '删除容量维护窗口失败'
   }
 }
 
@@ -180,7 +269,19 @@ function formatSize(value) {
 }
 function formatDate(value) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(serverDate(value))
+}
+function toLocalInput(value) {
+  const date = value instanceof Date ? value : serverDate(value)
+  const pad = number => String(number).padStart(2, '0')
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+}
+function localDateTime(value) {
+  return value ? new Date(value).toISOString().slice(0, 19) : value
+}
+function serverDate(value) {
+  if (value instanceof Date) return value
+  return new Date(typeof value === 'string' && !/(Z|[+-]\d{2}:\d{2})$/.test(value) ? value + 'Z' : value)
 }
 function releaseLabel(id) {
   const release = releases.value.find(item => String(item.id) === String(id))
@@ -206,7 +307,7 @@ onMounted(() => load())
   <section class="capacity-center">
     <header class="capacity-heading">
       <div><p>CAPACITY &amp; RELEASE BASELINE</p><h2>容量规划中心</h2><span>持续采集业务与运行指标，预测阈值风险，并量化比较发布前后的容量变化。</span></div>
-      <div class="heading-actions"><select v-model="days" @change="load()"><option :value="7">近 7 天</option><option :value="30">近 30 天</option><option :value="90">近 90 天</option><option :value="180">近 180 天</option></select><button class="secondary" :disabled="loading" @click="load()">{{ loading ? '同步中…' : '刷新' }}</button><button @click="showCapture = true">＋ 创建快照</button></div>
+      <div class="heading-actions"><select v-model="days" @change="load()"><option :value="7">近 7 天</option><option :value="30">近 30 天</option><option :value="90">近 90 天</option><option :value="180">近 180 天</option></select><button class="secondary" @click="openPolicyEditor">策略配置</button><button class="secondary" :disabled="loading" @click="load()">{{ loading ? '同步中…' : '刷新' }}</button><button @click="showCapture = true">＋ 创建快照</button></div>
     </header>
 
     <p v-if="error" class="capacity-error">{{ error }} <button @click="error = ''">×</button></p>
@@ -224,10 +325,32 @@ onMounted(() => load())
         <article><span>数据占用</span><strong class="size">{{ formatSize(report.latest.databaseBytes) }}</strong><small>附件 {{ formatSize(report.latest.attachmentBytes) }}</small></article>
       </div>
 
+      <div class="governance-layout">
+        <section class="panel policy-panel">
+          <div class="panel-heading"><div><p>TENANT POLICY</p><h3>租户容量策略</h3><small>{{ policy?.inheritedDefaults ? '当前继承平台默认值' : '当前使用租户自定义阈值' }}</small></div><span :class="['policy-state', policy?.enabled ? 'enabled' : 'disabled']">{{ policy?.enabled ? '评估中' : '已暂停' }}</span></div>
+          <div class="policy-body"><div><span>预警水位</span><b>{{ policy?.warningPercent }}%</b></div><div><span>趋势观察</span><b>{{ policy?.watchDays }} 天</b></div><div><span>工单阈值</span><b>{{ Number(policy?.activeTicketsThreshold || 0).toLocaleString('zh-CN') }}</b></div><div><span>数据库阈值</span><b>{{ formatSize(policy?.databaseBytesThreshold) }}</b></div></div>
+          <footer><small>单项阈值设置为 0 可关闭该指标评估。</small><button @click="openPolicyEditor">调整策略</button></footer>
+        </section>
+
+        <section class="panel maintenance-panel">
+          <div class="panel-heading"><div><p>MAINTENANCE WINDOW</p><h3>通知维护窗口</h3><small>窗口期间保留风险证据，但抑制管理员通知。</small></div><button @click="openMaintenanceEditor()">＋ 新建</button></div>
+          <div v-if="activeMaintenance" class="active-maintenance"><strong>当前维护中 · {{ activeMaintenance.name }}</strong><span>至 {{ formatDate(activeMaintenance.endsAt) }} · {{ activeMaintenance.reason }}</span></div>
+          <div v-if="!maintenanceWindows.length" class="maintenance-empty">尚未配置维护窗口。</div>
+          <div v-else class="maintenance-list"><article v-for="item in maintenanceWindows.slice(0, 5)" :key="item.id"><div><strong>{{ item.name }}</strong><small>{{ formatDate(item.startsAt) }} → {{ formatDate(item.endsAt) }}</small><span>{{ item.reason }}</span></div><em :class="{ off: !item.enabled }">{{ item.enabled ? '启用' : '停用' }}</em><aside><button @click="openMaintenanceEditor(item)">编辑</button><button class="danger" @click="deleteMaintenance(item)">删除</button></aside></article></div>
+        </section>
+
+        <section class="panel history-panel">
+          <div class="panel-heading"><div><p>RISK HISTORY</p><h3>{{ alertHistory.days }} 天风险画像</h3><small>持续衡量预警量、解决效率与维护抑制情况。</small></div><span>{{ alertHistory.resolutionRate }}% 已解决</span></div>
+          <div class="history-kpis"><div><span>新建预警</span><b>{{ alertHistory.totalAlerts }}</b></div><div><span>已解决</span><b>{{ alertHistory.resolvedAlerts }}</b></div><div><span>抑制通知</span><b>{{ alertHistory.suppressedAlerts }}</b></div><div><span>平均解决</span><b>{{ alertHistory.meanResolutionHours }}h</b></div></div>
+          <div class="history-chart"><i v-for="item in alertHistory.daily" :key="item.date" :style="{ height: Math.max(4, Number(item.created || 0) / historyMax * 100) + '%' }" :title="item.date + ' · ' + item.created + ' 条'" :class="{ critical: item.critical > 0 }"></i></div>
+          <div class="metric-history"><span v-for="item in alertHistory.metrics.slice(0, 4)" :key="item.key"><b>{{ item.label }}</b>{{ item.total }} 次 · {{ item.critical }} 严重</span></div>
+        </section>
+      </div>
+
       <section class="panel capacity-alert-panel">
         <div class="panel-heading"><div><p>CAPACITY GOVERNANCE</p><h3>容量风险处置队列</h3><small>阈值触顶、80% 利用率或预计 30 天内触顶时自动建单；风险升级会重新提醒管理员。</small></div><div class="alert-heading-actions"><div class="alert-summary"><span class="critical">{{ alertSummary.critical }} 严重</span><span class="warning">{{ alertSummary.warning }} 预警</span><span>{{ alertSummary.acknowledged }} 已确认</span></div><select v-model="alertStatus" @change="loadAlerts"><option value="">全部状态</option><option value="OPEN">待处理</option><option value="ACKNOWLEDGED">已确认</option><option value="RESOLVED">已解决</option></select></div></div>
         <div v-if="!alerts.length" class="alert-empty">当前筛选范围内没有容量预警，系统会在每次容量采样后自动评估。</div>
-        <div v-else class="capacity-alert-table"><div class="capacity-alert-row heading"><span>风险指标</span><span>当前 / 阈值</span><span>预测</span><span>状态</span><span>最近检测</span><span>操作</span></div><div v-for="alert in alerts" :key="alert.id" class="capacity-alert-row"><div><strong>{{ alert.metricLabel }}</strong><small>{{ alert.alertNo }} · 累计命中 {{ alert.occurrenceCount }} 次</small></div><div><b>{{ alertMetricValue(alert, alert.currentValue) }} / {{ alertMetricValue(alert, alert.thresholdValue) }}</b><small>利用率 {{ alert.utilizationPercent }}%</small></div><div><span :class="['level', String(alert.level).toLowerCase()]">{{ levelLabels[alert.level] }}</span><small>{{ alert.projectedDays == null ? '按当前趋势暂无触顶时间' : '预计 ' + alert.projectedDays + ' 天后触顶' }}</small></div><div><em :class="['alert-status', String(alert.status).toLowerCase()]">{{ alertStatusLabels[alert.status] }}</em><small v-if="alert.acknowledgementNote">{{ alert.acknowledgementNote }}</small><small v-else-if="alert.resolutionNote">{{ alert.resolutionNote }}</small></div><div><b>{{ formatDate(alert.lastDetectedAt) }}</b><small>首次 {{ formatDate(alert.firstDetectedAt) }}</small></div><div class="alert-actions"><button v-if="alert.status === 'OPEN'" class="secondary" @click="openAlertOperation(alert, 'acknowledge')">确认</button><button v-if="alert.status !== 'RESOLVED'" @click="openAlertOperation(alert, 'resolve')">解决</button></div></div></div>
+        <div v-else class="capacity-alert-table"><div class="capacity-alert-row heading"><span>风险指标</span><span>当前 / 阈值</span><span>预测</span><span>状态</span><span>最近检测</span><span>操作</span></div><div v-for="alert in alerts" :key="alert.id" class="capacity-alert-row"><div><strong>{{ alert.metricLabel }}</strong><small>{{ alert.alertNo }} · 累计命中 {{ alert.occurrenceCount }} 次</small><small v-if="alert.notificationSuppressed" class="suppressed">维护期通知已抑制</small></div><div><b>{{ alertMetricValue(alert, alert.currentValue) }} / {{ alertMetricValue(alert, alert.thresholdValue) }}</b><small>利用率 {{ alert.utilizationPercent }}%</small></div><div><span :class="['level', String(alert.level).toLowerCase()]">{{ levelLabels[alert.level] }}</span><small>{{ alert.projectedDays == null ? '按当前趋势暂无触顶时间' : '预计 ' + alert.projectedDays + ' 天后触顶' }}</small></div><div><em :class="['alert-status', String(alert.status).toLowerCase()]">{{ alertStatusLabels[alert.status] }}</em><small v-if="alert.acknowledgementNote">{{ alert.acknowledgementNote }}</small><small v-else-if="alert.resolutionNote">{{ alert.resolutionNote }}</small></div><div><b>{{ formatDate(alert.lastDetectedAt) }}</b><small>首次 {{ formatDate(alert.firstDetectedAt) }}</small></div><div class="alert-actions"><button v-if="alert.status === 'OPEN'" class="secondary" @click="openAlertOperation(alert, 'acknowledge')">确认</button><button v-if="alert.status !== 'RESOLVED'" @click="openAlertOperation(alert, 'resolve')">解决</button></div></div></div>
       </section>
 
       <div class="capacity-layout">
@@ -258,9 +381,12 @@ onMounted(() => load())
 
     <div v-if="showCapture" class="capacity-backdrop" @click.self="showCapture = false"><form @submit.prevent="capture"><header><div><p>CAPTURE BASELINE</p><h3>创建容量快照</h3><span>关联发布后将作为长期保留的发布基线。</span></div><button type="button" @click="showCapture = false">×</button></header><label>关联发布（可选）<select v-model="captureForm.releaseId"><option value="">普通手工快照</option><option v-for="release in releases" :key="release.id" :value="String(release.id)">{{ release.releaseNo }} · {{ release.name }}</option></select></label><label>快照名称<input v-model="captureForm.label" maxlength="120" placeholder="例如：双十一扩容前基线" /></label><label>应用版本<input v-model="captureForm.appVersion" maxlength="64" placeholder="例如：v1.8.0；留空则使用环境版本" /></label><aside>快照会记录工单吞吐、SLA 积压、事件告警、消息队列、附件扫描、数据库与 JVM 内存等指标。</aside><footer><button type="button" class="cancel" @click="showCapture = false">取消</button><button :disabled="saving">{{ saving ? '采集中…' : '创建快照' }}</button></footer></form></div>
     <div v-if="showAlertAction" class="capacity-backdrop" @click.self="showAlertAction = false"><form @submit.prevent="submitAlertOperation"><header><div><p>CAPACITY ACTION</p><h3>{{ alertAction === 'resolve' ? '解决容量预警' : '确认容量预警' }}</h3><span>{{ selectedAlert?.metricLabel }} · 当前 {{ alertMetricValue(selectedAlert, selectedAlert?.currentValue) }} / 阈值 {{ alertMetricValue(selectedAlert, selectedAlert?.thresholdValue) }}</span></div><button type="button" @click="showAlertAction = false">×</button></header><label>{{ alertAction === 'resolve' ? '解决说明（至少 5 个字符）' : '确认说明（可选）' }}<textarea v-model="alertNote" maxlength="500" rows="4" :placeholder="alertAction === 'resolve' ? '例如：已扩容数据库并验证连接池水位恢复正常' : '例如：已纳入本周扩容窗口'" /></label><aside v-if="alertAction === 'acknowledge'">确认后预警保留在跟踪队列；若风险等级继续上升，系统会自动重新打开并通知管理员。</aside><aside v-else>人工解决会关闭当前预警；若后续指标再次达到风险条件，系统会创建新的活跃预警。</aside><footer><button type="button" class="cancel" @click="showAlertAction = false">取消</button><button :disabled="alertSaving">{{ alertSaving ? '提交中…' : (alertAction === 'resolve' ? '确认解决' : '确认预警') }}</button></footer></form></div>
+    <div v-if="showPolicy" class="capacity-backdrop" @click.self="showPolicy = false"><form class="wide-form" @submit.prevent="savePolicy"><header><div><p>TENANT CAPACITY POLICY</p><h3>配置容量告警策略</h3><span>策略按租户隔离，修改后将在下一次容量采样时生效。</span></div><button type="button" @click="showPolicy = false">×</button></header><div class="policy-form-grid"><label>活跃工单阈值<input v-model.number="policyForm.activeTicketsThreshold" type="number" min="0" required /></label><label>逾期工单阈值<input v-model.number="policyForm.overdueTicketsThreshold" type="number" min="0" required /></label><label>活跃事件阈值<input v-model.number="policyForm.activeIncidentsThreshold" type="number" min="0" required /></label><label>未恢复告警阈值<input v-model.number="policyForm.firingAlertsThreshold" type="number" min="0" required /></label><label>异步消息积压<input v-model.number="policyForm.asyncBacklogThreshold" type="number" min="0" required /></label><label>附件扫描积压<input v-model.number="policyForm.attachmentBacklogThreshold" type="number" min="0" required /></label><label>附件存储阈值（bytes）<input v-model.number="policyForm.attachmentBytesThreshold" type="number" min="0" required /></label><label>数据库阈值（bytes）<input v-model.number="policyForm.databaseBytesThreshold" type="number" min="0" required /></label><label>预警水位（50-99%）<input v-model.number="policyForm.warningPercent" type="number" min="50" max="99" required /></label><label>趋势观察天数<input v-model.number="policyForm.watchDays" type="number" min="1" max="365" required /></label></div><label class="toggle-field"><input v-model="policyForm.enabled" type="checkbox" />启用容量风险自动评估</label><aside>阈值为 0 的指标不会创建预警；停用整体策略后，已有活跃预警会在下次采样时自动恢复关闭。</aside><footer><button type="button" class="cancel" @click="showPolicy = false">取消</button><button :disabled="policySaving">{{ policySaving ? '保存中…' : '保存并生效' }}</button></footer></form></div>
+    <div v-if="showMaintenance" class="capacity-backdrop" @click.self="showMaintenance = false"><form @submit.prevent="saveMaintenance"><header><div><p>MAINTENANCE WINDOW</p><h3>{{ editingMaintenanceId ? '编辑容量维护窗口' : '创建容量维护窗口' }}</h3><span>窗口期间仍创建并升级预警，但管理员通知会被抑制并留下审计记录。</span></div><button type="button" @click="showMaintenance = false">×</button></header><label>窗口名称<input v-model="maintenanceForm.name" maxlength="120" required placeholder="例如：生产数据库扩容" /></label><div class="time-grid"><label>开始时间<input v-model="maintenanceForm.startsAt" type="datetime-local" required /></label><label>结束时间<input v-model="maintenanceForm.endsAt" type="datetime-local" required /></label></div><label>维护原因<textarea v-model="maintenanceForm.reason" rows="4" maxlength="1000" required placeholder="说明维护范围、负责人和预期影响" /></label><label class="toggle-field"><input v-model="maintenanceForm.enabled" type="checkbox" />启用此维护窗口</label><aside>同一租户的启用窗口不能重叠，单个窗口最长 30 天。窗口结束后，尚未确认的风险会恢复通知。</aside><footer><button type="button" class="cancel" @click="showMaintenance = false">取消</button><button :disabled="maintenanceSaving">{{ maintenanceSaving ? '保存中…' : '保存窗口' }}</button></footer></form></div>
   </section>
 </template>
 
 <style scoped>
 .capacity-center{overflow:hidden;border:1px solid #e1e8ef;border-radius:14px;background:#f7f9fc;color:#2c3d53}.capacity-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px;background:linear-gradient(120deg,#f0f6ff,#f2fbf8)}.capacity-heading p,.panel-heading p,.capacity-backdrop header p{margin:0 0 5px;color:#4b6fc5;font-size:9px;font-weight:900;letter-spacing:1px}.capacity-heading h2,.panel-heading h3,.capacity-backdrop h3{margin:0 0 5px}.capacity-heading h2{font-size:18px}.capacity-heading span,.panel-heading small,.capacity-backdrop header span{color:#7e8c9e;font-size:10px}.heading-actions,.compare-controls{display:flex;align-items:center;gap:8px}.heading-actions select,.heading-actions button,.compare-controls select,.compare-controls button{padding:9px 11px;border:1px solid #d3dce6;border-radius:8px;background:#fff;color:#42536b;font-size:10px}.heading-actions button,.compare-controls button{border-color:#5570c8;background:#5570c8;color:#fff;font-weight:900}.heading-actions .secondary{background:#fff;color:#5570c8}.capacity-error,.capacity-notice{margin:12px 14px 0;padding:9px 11px;border-radius:8px;font-size:10px}.capacity-error{background:#fff0f2;color:#a42e43}.capacity-error button{float:right;border:0;background:transparent;color:inherit}.capacity-notice{background:#e8f8f2;color:#14765f}.capacity-empty{display:grid;place-items:center;gap:8px;min-height:310px;color:#8491a2;font-size:11px}.capacity-empty strong{color:#40526a;font-size:16px}.capacity-empty button{padding:9px 13px;border:0;border-radius:8px;background:#5872c9;color:#fff}.capacity-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:14px}.capacity-stats article{padding:13px;border:1px solid #e1e8ef;border-radius:10px;background:#fff}.capacity-stats span,.capacity-stats small{display:block;color:#8491a2;font-size:9px}.capacity-stats strong{display:block;margin:7px 0;color:#304158;font-size:21px}.capacity-stats strong i{color:#8997a8;font-size:12px;font-style:normal}.capacity-stats .size{font-size:15px;line-height:25px}.capacity-stats .warning strong{color:#b14a35}.capacity-alert-panel{margin:0 14px 12px}.alert-heading-actions,.alert-summary{display:flex;align-items:center;gap:7px}.alert-heading-actions>select{padding:8px;border:1px solid #d5dee7;border-radius:7px;background:#fff;color:#526176;font-size:9px}.alert-summary span{padding:5px 7px;border-radius:999px;background:#eef2f6;color:#617188;font-size:8px;font-weight:900}.alert-summary .critical{background:#ffe5e9;color:#a72e43}.alert-summary .warning{background:#fff1d9;color:#97610d}.alert-empty{padding:30px;color:#8895a5;text-align:center;font-size:10px}.capacity-alert-table{overflow:auto}.capacity-alert-row{display:grid;grid-template-columns:1.2fr 1fr 1.15fr 1fr 1fr .7fr;align-items:center;min-width:960px;padding:11px 14px;border-top:1px solid #edf1f4;font-size:10px}.capacity-alert-row.heading{border:0;background:#fbfcfd;color:#8793a3;font-size:9px}.capacity-alert-row strong,.capacity-alert-row small,.capacity-alert-row b{display:block}.capacity-alert-row small{margin-top:4px;color:#8995a4;font-size:8px}.alert-status{display:inline-block;padding:4px 7px;border-radius:999px;background:#eef2f6;color:#617188;font-size:8px;font-style:normal;font-weight:900}.alert-status.open{background:#ffe7ea;color:#a42f43}.alert-status.acknowledged{background:#fff1d9;color:#97610d}.alert-status.resolved{background:#e5f7f0;color:#14775f}.alert-actions{display:flex;gap:6px}.alert-actions button{padding:6px 8px;border:1px solid #5872c9;border-radius:7px;background:#5872c9;color:#fff;font-size:9px}.alert-actions .secondary{background:#fff;color:#5872c9}.capacity-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(360px,.75fr);gap:12px;padding:0 14px 12px}.panel{border:1px solid #e1e8ef;border-radius:11px;background:#fff}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px;border-bottom:1px solid #e9eef3}.panel-heading h3{font-size:14px}.panel-heading>select{padding:8px;border:1px solid #d5dee7;border-radius:7px;font-size:10px}.trend-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:13px}.trend-summary div{padding:10px;border-radius:8px;background:#f7f9fc}.trend-summary span,.trend-summary b{display:block}.trend-summary span{color:#8693a3;font-size:9px}.trend-summary b{margin-top:5px;font-size:12px}.trend-summary .negative{color:#17806a}.trend-summary .positive{color:#a65c28}.capacity-chart{display:flex;align-items:flex-end;gap:2px;height:150px;padding:15px 15px 0}.chart-point{display:flex;align-items:flex-end;flex:1;height:100%;min-width:2px}.chart-point i{width:100%;min-height:3px;border-radius:3px 3px 0 0;background:linear-gradient(#5f7bd3,#8ca1e3)}.chart-axis{display:flex;justify-content:space-between;padding:7px 15px 13px;color:#8a97a7;font-size:9px}.risk-list{display:grid;gap:9px;padding:13px}.risk-list article{display:grid;grid-template-columns:1fr auto;gap:7px;padding:10px;border:1px solid #e8edf2;border-radius:8px}.risk-list strong,.risk-list small{display:block}.risk-list strong{font-size:10px}.risk-list small{margin-top:3px;color:#8794a5;font-size:9px}.level{padding:4px 7px;border-radius:999px;background:#eef2f6;color:#67778c;font-size:8px;font-weight:900}.level.healthy{background:#e5f7f0;color:#17765f}.level.watch{background:#eef0ff;color:#5f64a9}.level.warning{background:#fff1d9;color:#97610d}.level.critical{background:#ffe5e9;color:#a72e43}.risk-progress{grid-column:1/-1;height:5px;border-radius:6px;background:#edf1f5}.risk-progress i{display:block;height:100%;border-radius:inherit;background:#6d86d3}.risk-list footer{display:flex;grid-column:1/-1;justify-content:space-between}.comparison-panel,.snapshot-panel{margin:0 14px 12px}.compare-controls select{max-width:240px}.comparison-empty{padding:38px;color:#8a96a5;text-align:center;font-size:10px}.comparison-banner{display:grid;grid-template-columns:1fr auto 1fr 1fr;align-items:center;gap:15px;padding:14px;background:#f8fafc}.comparison-banner>div span,.comparison-banner>div small{display:block;color:#8794a4;font-size:9px}.comparison-banner>div strong{display:block;margin:4px 0}.comparison-banner>aside{display:flex;justify-content:flex-end;gap:7px}.comparison-banner aside span{padding:6px 8px;border-radius:999px;font-size:9px;font-weight:900}.improved{background:#e5f7f0;color:#14775f}.regressed{background:#ffe7ea;color:#a42f43}.comparison-table{overflow:auto}.comparison-row{display:grid;grid-template-columns:1.3fr repeat(4,1fr);align-items:center;min-width:760px;padding:10px 14px;border-top:1px solid #edf1f4;font-size:10px}.comparison-row.heading{border:0;background:#fbfcfd;color:#8793a3;font-size:9px}.comparison-row b small{display:block;color:#8a97a7}.comparison-row em{justify-self:start;padding:4px 7px;border-radius:999px;font-size:8px;font-style:normal;font-weight:900}.comparison-row em.improved{background:#e5f7f0;color:#14775f}.comparison-row em.regressed{background:#ffe7ea;color:#a42f43}.comparison-row em.stable{background:#eef2f6;color:#65758a}.comparison-row em.neutral{background:#edf0ff;color:#5866ad}.snapshot-table{overflow:auto}.snapshot-table table{width:100%;min-width:1000px;border-collapse:collapse}.snapshot-table th,.snapshot-table td{padding:10px 13px;text-align:left}.snapshot-table th{background:#fbfcfd;color:#8793a3;font-size:9px}.snapshot-table td{border-top:1px solid #edf1f4;font-size:10px}.snapshot-table strong,.snapshot-table small,.snapshot-table b{display:block}.snapshot-table small{margin-top:4px;color:#8995a4;font-size:9px}.snapshot-type{padding:4px 7px;border-radius:999px;background:#eef2f6;color:#65758b;font-size:8px;font-weight:900}.snapshot-type.release_baseline{background:#eeeaff;color:#6b54ab}.snapshot-type.manual{background:#e8f4ff;color:#3f6f9b}.capacity-backdrop{position:fixed;z-index:1400;inset:0;display:grid;place-items:center;padding:20px;background:rgba(14,27,43,.62)}.capacity-backdrop form{width:min(540px,100%);padding:22px;border-radius:15px;background:#fff;box-shadow:0 24px 70px rgba(10,24,38,.3)}.capacity-backdrop header{display:flex;justify-content:space-between}.capacity-backdrop header button{border:0;background:transparent;color:#7f8b9a;font-size:22px}.capacity-backdrop label{display:grid;gap:6px;margin-top:13px;color:#596a7e;font-size:10px;font-weight:800}.capacity-backdrop input,.capacity-backdrop select,.capacity-backdrop textarea{padding:10px;border:1px solid #d7e0e8;border-radius:8px;font:inherit;resize:vertical}.capacity-backdrop aside{margin-top:14px;padding:10px;border-radius:8px;background:#f4f7fb;color:#6f7e91;font-size:9px;line-height:1.6}.capacity-backdrop footer{display:flex;justify-content:flex-end;gap:8px;margin-top:17px}.capacity-backdrop footer button{padding:9px 13px;border:0;border-radius:8px;background:#5872c9;color:#fff;font-size:10px;font-weight:900}.capacity-backdrop footer .cancel{border:1px solid #d6dee6;background:#fff;color:#647287}@media(max-width:1100px){.capacity-stats{grid-template-columns:repeat(3,1fr)}.capacity-layout{grid-template-columns:1fr}.alert-heading-actions{align-items:flex-end;flex-direction:column}}@media(max-width:720px){.capacity-heading,.panel-heading{align-items:flex-start;flex-direction:column}.heading-actions,.compare-controls,.alert-summary{flex-wrap:wrap}.capacity-stats{grid-template-columns:repeat(2,1fr)}.trend-summary{grid-template-columns:repeat(2,1fr)}}
+.governance-layout{display:grid;grid-template-columns:1fr 1.25fr 1.25fr;gap:12px;padding:0 14px 12px}.governance-layout>.panel{min-width:0}.policy-state{padding:5px 8px;border-radius:999px;font-size:8px;font-weight:900}.policy-state.enabled{background:#e5f7f0;color:#14775f}.policy-state.disabled{background:#ffe7ea;color:#a42f43}.policy-body,.history-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;padding:12px}.policy-body div,.history-kpis div{padding:9px;border-radius:8px;background:#f7f9fc}.policy-body span,.history-kpis span{display:block;color:#8794a4;font-size:8px}.policy-body b,.history-kpis b{display:block;margin-top:4px;font-size:12px}.policy-panel>footer{display:flex;align-items:center;justify-content:space-between;padding:0 12px 12px}.policy-panel>footer small{color:#8a97a7;font-size:8px}.policy-panel button,.maintenance-panel button{padding:6px 9px;border:1px solid #5872c9;border-radius:7px;background:#5872c9;color:#fff;font-size:8px;font-weight:900}.active-maintenance{display:grid;gap:4px;margin:10px 12px 0;padding:9px;border-radius:8px;background:#fff1d9;color:#81570f;font-size:9px}.active-maintenance span{font-size:8px}.maintenance-empty{padding:25px;color:#8995a5;text-align:center;font-size:9px}.maintenance-list{max-height:210px;overflow:auto;padding:7px 12px 12px}.maintenance-list article{display:grid;grid-template-columns:1fr auto;gap:5px;padding:8px 0;border-bottom:1px solid #edf1f4}.maintenance-list article>div strong,.maintenance-list article>div small,.maintenance-list article>div span{display:block}.maintenance-list article>div strong{font-size:9px}.maintenance-list article>div small,.maintenance-list article>div span{margin-top:3px;color:#8995a4;font-size:8px}.maintenance-list article>em{padding:3px 6px;border-radius:999px;background:#e5f7f0;color:#14775f;font-size:7px;font-style:normal;font-weight:900}.maintenance-list article>em.off{background:#eef2f6;color:#718095}.maintenance-list article>aside{display:flex;grid-column:1/-1;gap:5px}.maintenance-list .danger{border-color:#e6b9c0;background:#fff;color:#a42f43}.history-panel>.panel-heading>span{color:#5570c8;font-size:10px;font-weight:900}.history-chart{display:flex;align-items:flex-end;gap:2px;height:52px;padding:2px 12px 8px}.history-chart i{flex:1;min-width:2px;border-radius:3px 3px 0 0;background:#7e97de}.history-chart i.critical{background:#d86273}.metric-history{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 12px}.metric-history span{padding:5px 7px;border-radius:6px;background:#f4f6fa;color:#78869a;font-size:7px}.metric-history b{margin-right:4px;color:#465970}.capacity-alert-row .suppressed{color:#9b6812}.wide-form{width:min(720px,100%)!important}.policy-form-grid,.time-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 12px}.toggle-field{display:flex!important;grid-template-columns:auto!important;align-items:center;gap:7px!important}.toggle-field input{width:auto}.capacity-backdrop form{max-height:90vh;overflow:auto}@media(max-width:1250px){.governance-layout{grid-template-columns:1fr 1fr}.history-panel{grid-column:1/-1}}@media(max-width:720px){.governance-layout{grid-template-columns:1fr}.history-panel{grid-column:auto}.policy-form-grid,.time-grid{grid-template-columns:1fr}}
 </style>

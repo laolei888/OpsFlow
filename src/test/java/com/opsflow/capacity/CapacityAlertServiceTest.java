@@ -29,23 +29,22 @@ import static org.mockito.Mockito.when;
 class CapacityAlertServiceTest {
     @Mock private CapacityAlertMapper alertMapper;
     @Mock private CapacitySnapshotMapper snapshotMapper;
+    @Mock private CapacityPolicyService policyService;
+    @Mock private CapacityMaintenanceWindowService maintenanceWindowService;
     @Mock private AuthService authService;
     @Mock private AsyncNotificationPublisher notificationPublisher;
     @Mock private AuditLogService auditLogService;
 
     private CapacityAlertService service;
-    private CapacityProperties properties;
-
     @BeforeEach
     void setUp() {
-        properties = new CapacityProperties();
-        properties.getThresholds().setActiveTickets(100);
-        service = new CapacityAlertService(alertMapper, snapshotMapper, properties, authService,
-                notificationPublisher, auditLogService);
+        service = new CapacityAlertService(alertMapper, snapshotMapper, policyService, maintenanceWindowService,
+                authService, notificationPublisher, auditLogService);
     }
 
     @Test
     void createsCriticalAlertAndNotifiesTenantAdministrators() {
+        stubPolicy(100, true);
         CapacitySnapshot snapshot = snapshot(11L, 100);
         when(snapshotMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(null);
@@ -75,6 +74,7 @@ class CapacityAlertServiceTest {
 
     @Test
     void escalatesAcknowledgedAlertAndReopensIt() {
+        stubPolicy(100, true);
         CapacityAlert existing = alert(CapacityAlertStatus.ACKNOWLEDGED, CapacityAlertLevel.WATCH);
         when(snapshotMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(existing, null, null, null, null, null, null, null);
@@ -94,6 +94,7 @@ class CapacityAlertServiceTest {
 
     @Test
     void automaticallyResolvesAlertAfterMetricReturnsToSafeRange() {
+        stubPolicy(100, true);
         CapacityAlert existing = alert(CapacityAlertStatus.OPEN, CapacityAlertLevel.WARNING);
         when(snapshotMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(existing, null, null, null, null, null, null, null);
@@ -112,7 +113,7 @@ class CapacityAlertServiceTest {
 
     @Test
     void disabledThresholdResolvesActiveAlertWithoutDivisionByZero() {
-        properties.getThresholds().setActiveTickets(0);
+        stubPolicy(0, true);
         CapacityAlert existing = alert(CapacityAlertStatus.OPEN, CapacityAlertLevel.WARNING);
         when(snapshotMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(existing, null, null, null, null, null, null, null);
@@ -122,6 +123,45 @@ class CapacityAlertServiceTest {
         assertThat(existing.getStatus()).isEqualTo(CapacityAlertStatus.RESOLVED);
         assertThat(existing.getThresholdValue()).isZero();
         assertThat(existing.getUtilizationPercent()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void suppressesNotificationDuringMaintenanceAndReleasesItAfterWindow() {
+        stubPolicy(100, true);
+        CapacityMaintenanceWindow maintenance = new CapacityMaintenanceWindow();
+        maintenance.setId(81L);
+        maintenance.setTenantId(3L);
+        maintenance.setName("数据库扩容");
+        maintenance.setReason("计划内容量调整");
+        when(maintenanceWindowService.active(eq(3L), any(LocalDateTime.class)))
+                .thenReturn(maintenance, null);
+        when(snapshotMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        doAnswer(invocation -> {
+            invocation.<CapacityAlert>getArgument(0).setId(51L);
+            return 1;
+        }).when(alertMapper).insert(any(CapacityAlert.class));
+
+        service.evaluate(snapshot(15L, 100));
+
+        ArgumentCaptor<CapacityAlert> alertCaptor = ArgumentCaptor.forClass(CapacityAlert.class);
+        verify(alertMapper).insert(alertCaptor.capture());
+        CapacityAlert alert = alertCaptor.getValue();
+        assertThat(alert.getNotificationSuppressed()).isTrue();
+        assertThat(alert.getSuppressedNotificationCount()).isEqualTo(1);
+        assertThat(alert.getSuppressedByWindowId()).isEqualTo(81L);
+        verify(notificationPublisher, never()).enqueue(any(), any(), any(), any(), any(), any(), any(), any(), any());
+
+        when(alertMapper.selectOne(any(Wrapper.class))).thenReturn(alert, null, null, null, null, null, null, null);
+        when(authService.staffMembers(3L)).thenReturn(List.of(
+                new StaffSummary(7L, "admin", "平台管理员", List.of("ADMIN"))));
+        service.evaluate(snapshot(16L, 100));
+
+        assertThat(alert.getNotificationSuppressed()).isFalse();
+        assertThat(alert.getSuppressedNotificationCount()).isEqualTo(1);
+        verify(notificationPublisher).enqueue(eq(3L), eq(7L), eq(null), eq("CAPACITY_THRESHOLD"),
+                eq("容量阈值已触顶"), any(String.class), eq("CAPACITY_ALERT:51:CRITICAL"),
+                eq("CAPACITY_ALERT"), eq(51L));
     }
 
     @Test
@@ -147,6 +187,31 @@ class CapacityAlertServiceTest {
 
         assertThat(exception.getMessage()).contains("至少需要 5 个字符");
         verify(alertMapper, never()).updateById(any(CapacityAlert.class));
+    }
+
+    @Test
+    void aggregatesRiskHistoryByDayAndMetric() {
+        CapacityAlert resolved = alert(CapacityAlertStatus.RESOLVED, CapacityAlertLevel.CRITICAL);
+        resolved.setCreatedAt(LocalDateTime.now().minusDays(2));
+        resolved.setResolvedAt(resolved.getFirstDetectedAt().plusHours(3));
+        resolved.setSuppressedNotificationCount(1);
+        CapacityAlert open = alert(CapacityAlertStatus.OPEN, CapacityAlertLevel.WARNING);
+        open.setId(52L);
+        open.setCreatedAt(LocalDateTime.now().minusDays(1));
+        open.setSuppressedNotificationCount(0);
+        when(alertMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resolved, open));
+
+        CapacityAlertService.AlertHistoryReport report = service.history(3L, 30);
+
+        assertThat(report.totalAlerts()).isEqualTo(2);
+        assertThat(report.resolvedAlerts()).isEqualTo(1);
+        assertThat(report.suppressedAlerts()).isEqualTo(1);
+        assertThat(report.resolutionRate()).isEqualByComparingTo("50.00");
+        assertThat(report.meanResolutionHours()).isEqualByComparingTo("3.00");
+        assertThat(report.metrics()).singleElement().satisfies(metric -> {
+            assertThat(metric.total()).isEqualTo(2);
+            assertThat(metric.critical()).isEqualTo(1);
+        });
     }
 
     private CapacitySnapshot snapshot(Long id, long activeTickets) {
@@ -183,5 +248,11 @@ class CapacityAlertServiceTest {
         alert.setFirstDetectedAt(LocalDateTime.now().minusHours(1));
         alert.setLastDetectedAt(LocalDateTime.now().minusMinutes(5));
         return alert;
+    }
+
+    private void stubPolicy(long activeTicketsThreshold, boolean enabled) {
+        when(policyService.effective(3L)).thenReturn(new CapacityPolicyService.EffectivePolicy(
+                21L, 3L, activeTicketsThreshold, 500, 20, 100, 1000, 500,
+                5_368_709_120L, 10_737_418_240L, 80, 30, enabled, false, LocalDateTime.now()));
     }
 }

@@ -29,6 +29,7 @@ public class CapacityPlanningService {
     private final AuditLogService auditLogService;
     private final CapacityProperties properties;
     private final CapacityAlertService capacityAlertService;
+    private final CapacityPolicyService policyService;
 
     @Transactional
     public CapacitySnapshot captureManual(CaptureCommand command, Long tenantId, Long actorId) {
@@ -67,7 +68,8 @@ public class CapacityPlanningService {
                 .orderByAsc(CapacitySnapshot::getCapturedAt)
                 .orderByAsc(CapacitySnapshot::getId));
         CapacitySnapshot latest = all.isEmpty() ? null : all.get(all.size() - 1);
-        return new CapacityReport(days, all.size(), latest, sample(all), buildTrends(all));
+        CapacityPolicyService.EffectivePolicy policy = policyService.effective(tenantId);
+        return new CapacityReport(days, all.size(), latest, sample(all), buildTrends(all, definitions(policy), policy));
     }
 
     public CapacityComparison compare(Long baselineId, Long currentId, Long tenantId) {
@@ -76,7 +78,7 @@ public class CapacityPlanningService {
         }
         CapacitySnapshot baseline = requiredSnapshot(baselineId, tenantId);
         CapacitySnapshot current = requiredSnapshot(currentId, tenantId);
-        List<MetricDelta> metrics = definitions().stream()
+        List<MetricDelta> metrics = definitions(policyService.effective(tenantId)).stream()
                 .map(definition -> delta(definition, baseline, current))
                 .toList();
         long improved = metrics.stream().filter(metric -> metric.impact() == MetricImpact.IMPROVED).count();
@@ -141,12 +143,13 @@ public class CapacityPlanningService {
         return snapshot;
     }
 
-    private List<MetricTrend> buildTrends(List<CapacitySnapshot> snapshots) {
+    private List<MetricTrend> buildTrends(List<CapacitySnapshot> snapshots, List<MetricDefinition> definitions,
+                                          CapacityPolicyService.EffectivePolicy policy) {
         if (snapshots.isEmpty()) return List.of();
         CapacitySnapshot first = snapshots.get(0);
         CapacitySnapshot last = snapshots.get(snapshots.size() - 1);
         double elapsedDays = Math.max(Duration.between(first.getCapturedAt(), last.getCapturedAt()).toMinutes() / 1440.0, 1.0 / 24.0);
-        return definitions().stream().map(definition -> {
+        return definitions.stream().map(definition -> {
             long start = definition.reader().applyAsLong(first);
             long end = definition.reader().applyAsLong(last);
             long delta = end - start;
@@ -156,7 +159,7 @@ public class CapacityPlanningService {
                     ? null : round(end * 100.0 / definition.threshold());
             Long daysToLimit = definition.threshold() == null || end >= definition.threshold() || dailyGrowth <= 0
                     ? null : Math.max(0, (long) Math.ceil((definition.threshold() - end) / dailyGrowth));
-            CapacityLevel level = level(end, definition.threshold(), daysToLimit);
+            CapacityLevel level = level(end, definition.threshold(), daysToLimit, policy);
             return new MetricTrend(definition.key(), definition.label(), definition.unit(), start, end,
                     delta, percent, dailyGrowth, definition.threshold(), utilization, daysToLimit, level);
         }).toList();
@@ -186,19 +189,18 @@ public class CapacityPlanningService {
         return Collections.unmodifiableList(sampled);
     }
 
-    private List<MetricDefinition> definitions() {
-        CapacityProperties.Thresholds thresholds = properties.getThresholds();
+    private List<MetricDefinition> definitions(CapacityPolicyService.EffectivePolicy policy) {
         return List.of(
-                new MetricDefinition("activeTickets", "活跃工单", "张", CapacitySnapshot::getActiveTickets, thresholds.getActiveTickets(), Direction.LOWER_IS_BETTER),
-                new MetricDefinition("overdueTickets", "逾期工单", "张", CapacitySnapshot::getOverdueTickets, thresholds.getOverdueTickets(), Direction.LOWER_IS_BETTER),
+                new MetricDefinition("activeTickets", "活跃工单", "张", CapacitySnapshot::getActiveTickets, policy.activeTicketsThreshold(), Direction.LOWER_IS_BETTER),
+                new MetricDefinition("overdueTickets", "逾期工单", "张", CapacitySnapshot::getOverdueTickets, policy.overdueTicketsThreshold(), Direction.LOWER_IS_BETTER),
                 new MetricDefinition("ticketsCreated24h", "24h 新增", "张", CapacitySnapshot::getTicketsCreated24h, null, Direction.NEUTRAL),
                 new MetricDefinition("ticketsResolved24h", "24h 解决", "张", CapacitySnapshot::getTicketsResolved24h, null, Direction.HIGHER_IS_BETTER),
-                new MetricDefinition("activeIncidents", "活跃事件", "起", CapacitySnapshot::getActiveIncidents, thresholds.getActiveIncidents(), Direction.LOWER_IS_BETTER),
-                new MetricDefinition("firingAlerts", "未恢复告警", "条", CapacitySnapshot::getFiringAlerts, thresholds.getFiringAlerts(), Direction.LOWER_IS_BETTER),
-                new MetricDefinition("asyncBacklog", "异步消息积压", "条", CapacitySnapshot::getAsyncBacklog, thresholds.getAsyncBacklog(), Direction.LOWER_IS_BETTER),
-                new MetricDefinition("attachmentBacklog", "附件扫描积压", "份", CapacitySnapshot::getAttachmentBacklog, thresholds.getAttachmentBacklog(), Direction.LOWER_IS_BETTER),
-                new MetricDefinition("attachmentBytes", "附件存储", "bytes", CapacitySnapshot::getAttachmentBytes, thresholds.getAttachmentBytes(), Direction.NEUTRAL),
-                new MetricDefinition("databaseBytes", "数据库体积", "bytes", CapacitySnapshot::getDatabaseBytes, thresholds.getDatabaseBytes(), Direction.NEUTRAL),
+                new MetricDefinition("activeIncidents", "活跃事件", "起", CapacitySnapshot::getActiveIncidents, policy.activeIncidentsThreshold(), Direction.LOWER_IS_BETTER),
+                new MetricDefinition("firingAlerts", "未恢复告警", "条", CapacitySnapshot::getFiringAlerts, policy.firingAlertsThreshold(), Direction.LOWER_IS_BETTER),
+                new MetricDefinition("asyncBacklog", "异步消息积压", "条", CapacitySnapshot::getAsyncBacklog, policy.asyncBacklogThreshold(), Direction.LOWER_IS_BETTER),
+                new MetricDefinition("attachmentBacklog", "附件扫描积压", "份", CapacitySnapshot::getAttachmentBacklog, policy.attachmentBacklogThreshold(), Direction.LOWER_IS_BETTER),
+                new MetricDefinition("attachmentBytes", "附件存储", "bytes", CapacitySnapshot::getAttachmentBytes, policy.attachmentBytesThreshold(), Direction.NEUTRAL),
+                new MetricDefinition("databaseBytes", "数据库体积", "bytes", CapacitySnapshot::getDatabaseBytes, policy.databaseBytesThreshold(), Direction.NEUTRAL),
                 new MetricDefinition("heapUsedBytes", "JVM 堆使用", "bytes", CapacitySnapshot::getHeapUsedBytes, null, Direction.NEUTRAL),
                 new MetricDefinition("activeUsers", "活跃成员", "人", CapacitySnapshot::getActiveUsers, null, Direction.NEUTRAL),
                 new MetricDefinition("publishedArticles", "已发布知识", "篇", CapacitySnapshot::getPublishedArticles, null, Direction.HIGHER_IS_BETTER),
@@ -206,12 +208,13 @@ public class CapacityPlanningService {
         );
     }
 
-    private CapacityLevel level(long value, Long threshold, Long daysToLimit) {
-        if (threshold == null || threshold <= 0) return CapacityLevel.INFO;
+    private CapacityLevel level(long value, Long threshold, Long daysToLimit,
+                                CapacityPolicyService.EffectivePolicy policy) {
+        if (!policy.enabled() || threshold == null || threshold <= 0) return CapacityLevel.INFO;
         double ratio = value * 1.0 / threshold;
         if (ratio >= 1) return CapacityLevel.CRITICAL;
-        if (ratio >= 0.8) return CapacityLevel.WARNING;
-        if (daysToLimit != null && daysToLimit <= 30) return CapacityLevel.WATCH;
+        if (ratio * 100 >= policy.warningPercent()) return CapacityLevel.WARNING;
+        if (daysToLimit != null && daysToLimit <= policy.watchDays()) return CapacityLevel.WATCH;
         return CapacityLevel.HEALTHY;
     }
 

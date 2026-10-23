@@ -25,7 +25,13 @@ public class CapacityAlert {
     private BigDecimal dailyGrowth;
     private Long projectedDays;
     private Long snapshotId;
+    private Long policyId;
     private Integer occurrenceCount;
+    private Boolean notificationSuppressed;
+    private Integer suppressedNotificationCount;
+    private Long suppressedByWindowId;
+    private String suppressedReason;
+    private LocalDateTime lastSuppressedAt;
     private LocalDateTime firstDetectedAt;
     private LocalDateTime lastDetectedAt;
     private Long acknowledgedBy;
