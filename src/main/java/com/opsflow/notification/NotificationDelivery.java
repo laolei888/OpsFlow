@@ -19,6 +19,9 @@ public class NotificationDelivery {
     private NotificationChannel channel;
     private String destination;
     private String deliverySecret;
+    private Long templateVersionId;
+    private String renderedTitle;
+    private String renderedContent;
     private NotificationDeliveryStatus status;
     private Integer attemptCount;
     private LocalDateTime nextAttemptAt;

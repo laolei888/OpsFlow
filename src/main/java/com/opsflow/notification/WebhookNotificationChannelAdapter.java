@@ -63,8 +63,9 @@ public class WebhookNotificationChannelAdapter implements NotificationChannelAda
         value.put("tenantId", notification.getTenantId());
         value.put("recipientId", notification.getRecipientId());
         value.put("ticketId", notification.getTicketId());
-        value.put("title", notification.getTitle());
-        value.put("content", notification.getContent());
+        value.put("title", delivery.getRenderedTitle() == null ? notification.getTitle() : delivery.getRenderedTitle());
+        value.put("content", delivery.getRenderedContent() == null ? notification.getContent() : delivery.getRenderedContent());
+        value.put("templateVersionId", delivery.getTemplateVersionId());
         value.put("occurredAt", notification.getCreatedAt());
         try {
             return objectMapper.writeValueAsString(value);

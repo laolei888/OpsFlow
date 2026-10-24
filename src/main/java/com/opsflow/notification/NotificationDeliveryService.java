@@ -28,6 +28,7 @@ public class NotificationDeliveryService {
     private final NotificationDeliveryMapper deliveryMapper;
     private final NotificationMapper notificationMapper;
     private final NotificationPreferenceService preferenceService;
+    private final NotificationTemplateService templateService;
     private final AuditLogService auditLogService;
     private final NotificationDeliveryMetrics metrics;
     private final TransactionTemplate transactionTemplate;
@@ -36,6 +37,7 @@ public class NotificationDeliveryService {
     public NotificationDeliveryService(NotificationDeliveryMapper deliveryMapper,
                                        NotificationMapper notificationMapper,
                                        NotificationPreferenceService preferenceService,
+                                       NotificationTemplateService templateService,
                                        AuditLogService auditLogService,
                                        NotificationDeliveryMetrics metrics,
                                        PlatformTransactionManager transactionManager,
@@ -43,6 +45,7 @@ public class NotificationDeliveryService {
         this.deliveryMapper = deliveryMapper;
         this.notificationMapper = notificationMapper;
         this.preferenceService = preferenceService;
+        this.templateService = templateService;
         this.auditLogService = auditLogService;
         this.metrics = metrics;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -69,6 +72,11 @@ public class NotificationDeliveryService {
         if (preference.webhookEnabled()) {
             create(notification, NotificationChannel.WEBHOOK, preference.webhookUrl(), preference.webhookSecret(),
                     destinationStatus(preference.webhookUrl()), missingDestination(preference.webhookUrl(), "Webhook 地址"), now);
+        }
+        if (preference.wecomEnabled()) {
+            create(notification, NotificationChannel.WECOM, preference.wecomWebhookUrl(), null,
+                    destinationStatus(preference.wecomWebhookUrl()),
+                    missingDestination(preference.wecomWebhookUrl(), "企业微信机器人地址"), now);
         }
     }
 
@@ -216,6 +224,14 @@ public class NotificationDeliveryService {
             }
             delivery.setDestination(current.webhookUrl());
             delivery.setDeliverySecret(current.webhookSecret());
+            return;
+        }
+        if (delivery.getChannel() == NotificationChannel.WECOM) {
+            if (!current.wecomEnabled() || trim(current.wecomWebhookUrl()) == null) {
+                throw new BusinessException("接收人当前未启用该事件的企业微信通知，无法重试");
+            }
+            delivery.setDestination(current.wecomWebhookUrl());
+            delivery.setDeliverySecret(null);
         }
     }
 
@@ -297,6 +313,11 @@ public class NotificationDeliveryService {
         delivery.setChannel(channel);
         delivery.setDestination(destination);
         delivery.setDeliverySecret(secret);
+        NotificationTemplateService.RenderedTemplate rendered = templateService.render(
+                notification.getTenantId(), channel, notification);
+        delivery.setTemplateVersionId(rendered.versionId());
+        delivery.setRenderedTitle(rendered.title());
+        delivery.setRenderedContent(rendered.content());
         delivery.setStatus(status);
         delivery.setAttemptCount(0);
         delivery.setNextAttemptAt(now);
@@ -331,11 +352,12 @@ public class NotificationDeliveryService {
 
     private DeliveryView toView(NotificationDelivery delivery, Notification notification) {
         return new DeliveryView(delivery.getId(), delivery.getNotificationId(), delivery.getRecipientId(),
-                delivery.getNotificationType(), notification == null ? null : notification.getTitle(),
+                delivery.getNotificationType(), delivery.getRenderedTitle() == null
+                        ? (notification == null ? null : notification.getTitle()) : delivery.getRenderedTitle(),
                 delivery.getChannel(), destinationPreview(delivery.getChannel(), delivery.getDestination()),
                 delivery.getStatus(), delivery.getAttemptCount(), delivery.getNextAttemptAt(),
                 delivery.getResponseStatus(), delivery.getLastError(), delivery.getDeliveredAt(),
-                delivery.getCreatedAt(), delivery.getUpdatedAt());
+                delivery.getTemplateVersionId(), delivery.getCreatedAt(), delivery.getUpdatedAt());
     }
 
     private String destinationPreview(NotificationChannel channel, String value) {
@@ -345,13 +367,13 @@ public class NotificationDeliveryService {
             if (separator <= 1) return "***" + value.substring(Math.max(0, separator));
             return value.substring(0, 1) + "***" + value.substring(separator);
         }
-        if (channel == NotificationChannel.WEBHOOK) {
+        if (channel == NotificationChannel.WEBHOOK || channel == NotificationChannel.WECOM) {
             try {
                 URI uri = URI.create(value);
                 return uri.getScheme() + "://" + uri.getHost() + (uri.getPort() < 0 ? "" : ":" + uri.getPort())
                         + (uri.getPath() == null ? "" : uri.getPath());
             } catch (IllegalArgumentException ignored) {
-                return "Webhook 地址已配置";
+                return channel == NotificationChannel.WECOM ? "企业微信机器人已配置" : "Webhook 地址已配置";
             }
         }
         return value;
@@ -390,7 +412,7 @@ public class NotificationDeliveryService {
                                String title, NotificationChannel channel, String destinationPreview,
                                NotificationDeliveryStatus status, Integer attemptCount, LocalDateTime nextAttemptAt,
                                Integer responseStatus, String lastError, LocalDateTime deliveredAt,
-                               LocalDateTime createdAt, LocalDateTime updatedAt) { }
+                               Long templateVersionId, LocalDateTime createdAt, LocalDateTime updatedAt) { }
 
     public record DeliverySummary(long pending, long processing, long retrying, long delivered,
                                   long dead, long skipped, LocalDateTime oldestPendingAt) { }

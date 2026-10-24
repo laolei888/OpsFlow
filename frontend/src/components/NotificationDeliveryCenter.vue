@@ -15,7 +15,7 @@ const retryReason = ref('')
 const retrying = ref(false)
 let refreshTimer
 
-const channelLabels = { IN_APP: '站内信', EMAIL: '邮件', WEBHOOK: '个人 Webhook' }
+const channelLabels = { IN_APP: '站内信', EMAIL: '邮件', WEBHOOK: '个人 Webhook', WECOM: '企业微信' }
 const statusLabels = { PENDING: '待投递', PROCESSING: '投递中', RETRYING: '等待重试', DELIVERED: '已送达', DEAD: '死信', SKIPPED: '已跳过' }
 const backlog = computed(() => Number(summary.value.pending || 0) + Number(summary.value.processing || 0) + Number(summary.value.retrying || 0))
 
@@ -78,7 +78,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 <template>
   <div class="delivery-center">
     <div class="delivery-heading">
-      <div><p>MULTI-CHANNEL DELIVERY</p><h3>通知渠道投递</h3><span>统一追踪站内信、邮件和个人 Webhook，每个渠道拥有独立状态、租约与重试次数。</span></div>
+      <div><p>MULTI-CHANNEL DELIVERY</p><h3>通知渠道投递</h3><span>统一追踪站内信、邮件、个人 Webhook 与企业微信，每个渠道拥有独立状态、模板版本、租约与重试次数。</span></div>
       <button :disabled="loading" @click="load()">{{ loading ? '同步中…' : '刷新投递' }}</button>
     </div>
     <div class="delivery-stats">
@@ -101,7 +101,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
     <div v-else class="delivery-table-wrap"><table>
       <thead><tr><th>通知</th><th>渠道 / 目标</th><th>状态</th><th>尝试</th><th>时间</th><th></th></tr></thead>
       <tbody><tr v-for="item in deliveries" :key="item.id">
-        <td><strong>{{ item.title || '通知 #' + item.notificationId }}</strong><small>{{ item.notificationType }} · 接收人 #{{ item.recipientId }}</small></td>
+        <td><strong>{{ item.title || '通知 #' + item.notificationId }}</strong><small>{{ item.notificationType }} · 接收人 #{{ item.recipientId }}<template v-if="item.templateVersionId"> · 模板版本 #{{ item.templateVersionId }}</template></small></td>
         <td><b>{{ channelLabels[item.channel] || item.channel }}</b><code>{{ item.destinationPreview || '站内通知中心' }}</code></td>
         <td><span :class="['delivery-status', String(item.status).toLowerCase()]">{{ statusLabels[item.status] || item.status }}</span><small v-if="item.lastError" class="failure" :title="item.lastError">{{ item.lastError }}</small><small v-else-if="item.responseStatus">HTTP {{ item.responseStatus }}</small></td>
         <td><strong>{{ item.attemptCount || 0 }} / 5</strong><small v-if="['PENDING','PROCESSING','RETRYING'].includes(item.status)">下次 {{ formatDate(item.nextAttemptAt) }}</small></td>

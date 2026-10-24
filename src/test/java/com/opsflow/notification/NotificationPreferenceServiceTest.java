@@ -34,7 +34,7 @@ class NotificationPreferenceServiceTest {
         assertThat(view.emailAddress()).isNull();
         assertThat(view.webhookSecretPreview()).isNull();
         assertThat(view.rules()).containsExactly(
-                new NotificationPreferenceService.RuleView("*", true, false, false));
+                new NotificationPreferenceService.RuleView("*", true, false, false, false));
     }
 
     @Test
@@ -53,13 +53,28 @@ class NotificationPreferenceServiceTest {
 
         assertThat(resolved.emailEnabled()).isTrue();
         assertThat(resolved.webhookEnabled()).isTrue();
+        assertThat(resolved.wecomEnabled()).isFalse();
         assertThat(resolved.emailAddress()).isEqualTo("agent@example.com");
+    }
+
+    @Test
+    void masksWecomRobotKeyInPreferenceView() {
+        NotificationChannelProfile profile = new NotificationChannelProfile();
+        profile.setWecomWebhookUrl("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=secret-1234");
+        when(profileMapper.selectOne(any())).thenReturn(profile);
+        when(preferenceMapper.selectList(any())).thenReturn(List.of());
+
+        NotificationPreferenceService.PreferenceView view = preferenceService.get(1L, 7L);
+
+        assertThat(view.wecomWebhookUrlPreview()).contains("qyapi.weixin.qq.com").endsWith("1234");
+        assertThat(view.wecomWebhookUrlPreview()).doesNotContain("secret-");
     }
 
     @Test
     void rejectsEnabledEmailRuleWithoutAddress() {
         NotificationPreferenceService.PreferenceCommand command = new NotificationPreferenceService.PreferenceCommand(
-                null, null, null, List.of(new NotificationPreferenceService.RuleCommand("*", true, true, false)));
+                null, null, null, null, false,
+                List.of(new NotificationPreferenceService.RuleCommand("*", true, true, false, false)));
 
         assertThatThrownBy(() -> preferenceService.update(command, 1L, 7L))
                 .isInstanceOf(BusinessException.class)
@@ -70,7 +85,8 @@ class NotificationPreferenceServiceTest {
     void rejectsAdversarialEmailWithoutRegexBacktracking() {
         String malformed = "!@!." + "!.".repeat(120);
         NotificationPreferenceService.PreferenceCommand command = new NotificationPreferenceService.PreferenceCommand(
-                malformed, null, null, List.of(new NotificationPreferenceService.RuleCommand("*", true, false, false)));
+                malformed, null, null, null, false,
+                List.of(new NotificationPreferenceService.RuleCommand("*", true, false, false, false)));
 
         assertThatThrownBy(() -> preferenceService.update(command, 1L, 7L))
                 .isInstanceOf(BusinessException.class)
@@ -83,6 +99,7 @@ class NotificationPreferenceServiceTest {
         preference.setInAppEnabled(inApp);
         preference.setEmailEnabled(email);
         preference.setWebhookEnabled(webhook);
+        preference.setWecomEnabled(false);
         return preference;
     }
 }

@@ -17,6 +17,7 @@ public class NotificationChannelProfile {
     private String emailAddress;
     private String webhookUrl;
     private String webhookSecret;
+    private String wecomWebhookUrl;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

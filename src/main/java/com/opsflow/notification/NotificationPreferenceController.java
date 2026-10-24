@@ -40,17 +40,21 @@ public class NotificationPreferenceController {
     public record PreferenceRequest(@Email @Size(max = 254) String emailAddress,
                                     @Size(max = 1000) String webhookUrl,
                                     @Size(max = 200) String webhookSecret,
+                                    @Size(max = 1000) String wecomWebhookUrl,
+                                    Boolean clearWecomWebhook,
                                     @Size(max = 50) List<RuleRequest> rules) {
         NotificationPreferenceService.PreferenceCommand command() {
             return new NotificationPreferenceService.PreferenceCommand(emailAddress, webhookUrl, webhookSecret,
+                    wecomWebhookUrl, clearWecomWebhook,
                     rules == null ? List.of() : rules.stream().map(RuleRequest::command).toList());
         }
     }
 
     public record RuleRequest(@Size(max = 64) String eventType, boolean inAppEnabled,
-                              boolean emailEnabled, boolean webhookEnabled) {
+                              boolean emailEnabled, boolean webhookEnabled, boolean wecomEnabled) {
         NotificationPreferenceService.RuleCommand command() {
-            return new NotificationPreferenceService.RuleCommand(eventType, inAppEnabled, emailEnabled, webhookEnabled);
+            return new NotificationPreferenceService.RuleCommand(eventType, inAppEnabled, emailEnabled,
+                    webhookEnabled, wecomEnabled);
         }
     }
 }

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import NotificationDeliveryCenter from './NotificationDeliveryCenter.vue'
+import NotificationTemplateCenter from './NotificationTemplateCenter.vue'
 
 const props = defineProps({
   api: { type: Function, required: true },
@@ -286,6 +287,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       <button :class="{ active: activeSection === 'outbox' }" @click="activeSection = 'outbox'">事务 Outbox</button>
       <button :class="{ active: activeSection === 'deadLetters' }" @click="activeSection = 'deadLetters'">死信治理 <span v-if="deadSummary.quarantined">{{ deadSummary.quarantined }}</span></button>
       <button :class="{ active: activeSection === 'deliveries' }" @click="activeSection = 'deliveries'">渠道投递</button>
+      <button :class="{ active: activeSection === 'templates' }" @click="activeSection = 'templates'">通知模板</button>
     </nav>
 
     <div v-if="activeSection === 'outbox'" class="message-panel">
@@ -382,7 +384,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       </aside>
     </div>
 
-    <div v-else class="message-panel"><NotificationDeliveryCenter :api="api" /></div>
+    <div v-else-if="activeSection === 'deliveries'" class="message-panel"><NotificationDeliveryCenter :api="api" /></div>
+    <div v-else class="message-panel"><NotificationTemplateCenter :api="api" /></div>
 
     <div v-if="deadOperation" class="dead-operation-backdrop" @click.self="deadOperation = null">
       <form class="dead-operation-card" @submit.prevent="submitDeadOperation">

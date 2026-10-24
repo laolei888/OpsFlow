@@ -18,6 +18,7 @@ public class NotificationEventPreference {
     private Boolean inAppEnabled;
     private Boolean emailEnabled;
     private Boolean webhookEnabled;
+    private Boolean wecomEnabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

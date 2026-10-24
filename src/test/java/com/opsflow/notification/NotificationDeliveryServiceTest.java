@@ -21,6 +21,7 @@ class NotificationDeliveryServiceTest {
     @Mock private NotificationDeliveryMapper deliveryMapper;
     @Mock private NotificationMapper notificationMapper;
     @Mock private NotificationPreferenceService preferenceService;
+    @Mock private NotificationTemplateService templateService;
     @Mock private AuditLogService auditLogService;
     @Mock private NotificationDeliveryMetrics metrics;
     @Mock private PlatformTransactionManager transactionManager;
@@ -28,18 +29,24 @@ class NotificationDeliveryServiceTest {
     @Test
     void plansIndependentDeliveryForEveryEnabledChannel() {
         NotificationDeliveryService service = new NotificationDeliveryService(deliveryMapper, notificationMapper,
-                preferenceService, auditLogService, metrics, transactionManager, List.of());
+                preferenceService, templateService, auditLogService, metrics, transactionManager, List.of());
         Notification notification = notification();
         NotificationPreferenceService.ResolvedPreference preference =
-                new NotificationPreferenceService.ResolvedPreference(true, true, true,
-                        "agent@example.com", "https://notify.example.com/opsflow", "secret");
+                new NotificationPreferenceService.ResolvedPreference(true, true, true, true,
+                        "agent@example.com", "https://notify.example.com/opsflow", "secret",
+                        "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test");
+        when(templateService.render(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> new NotificationTemplateService.RenderedTemplate(null,
+                        notification.getTitle(), notification.getContent()));
 
         service.plan(notification, preference);
 
         ArgumentCaptor<NotificationDelivery> captor = ArgumentCaptor.forClass(NotificationDelivery.class);
-        verify(deliveryMapper, times(3)).insert(captor.capture());
+        verify(deliveryMapper, times(4)).insert(captor.capture());
         assertThat(captor.getAllValues()).extracting(NotificationDelivery::getChannel)
-                .containsExactly(NotificationChannel.IN_APP, NotificationChannel.EMAIL, NotificationChannel.WEBHOOK);
+                .containsExactly(NotificationChannel.IN_APP, NotificationChannel.EMAIL,
+                        NotificationChannel.WEBHOOK, NotificationChannel.WECOM);
         assertThat(captor.getAllValues().get(0).getStatus()).isEqualTo(NotificationDeliveryStatus.DELIVERED);
         assertThat(captor.getAllValues().get(1).getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
         assertThat(captor.getAllValues().get(2).getDeliverySecret()).isEqualTo("secret");
@@ -48,10 +55,14 @@ class NotificationDeliveryServiceTest {
     @Test
     void recordsSkippedInAppDeliveryWhenUserDisablesIt() {
         NotificationDeliveryService service = new NotificationDeliveryService(deliveryMapper, notificationMapper,
-                preferenceService, auditLogService, metrics, transactionManager, List.of());
+                preferenceService, templateService, auditLogService, metrics, transactionManager, List.of());
+
+        when(templateService.render(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new NotificationTemplateService.RenderedTemplate(null, "重大事件", "请立即响应"));
 
         service.plan(notification(), new NotificationPreferenceService.ResolvedPreference(
-                false, false, false, null, null, null));
+                false, false, false, false, null, null, null, null));
 
         ArgumentCaptor<NotificationDelivery> captor = ArgumentCaptor.forClass(NotificationDelivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -62,7 +73,7 @@ class NotificationDeliveryServiceTest {
     @Test
     void manualRetryRefreshesWebhookDestinationAndSecretFromCurrentPreference() {
         NotificationDeliveryService service = new NotificationDeliveryService(deliveryMapper, notificationMapper,
-                preferenceService, auditLogService, metrics, transactionManager, List.of());
+                preferenceService, templateService, auditLogService, metrics, transactionManager, List.of());
         NotificationDelivery delivery = new NotificationDelivery();
         delivery.setId(91L);
         delivery.setTenantId(1L);
@@ -77,8 +88,8 @@ class NotificationDeliveryServiceTest {
         delivery.setUpdatedAt(LocalDateTime.now().minusMinutes(5));
         when(deliveryMapper.selectForUpdate(91L, 1L)).thenReturn(delivery);
         when(preferenceService.resolve(1L, 7L, "INCIDENT_DECLARED"))
-                .thenReturn(new NotificationPreferenceService.ResolvedPreference(true, false, true,
-                        null, "https://new.example.com/hook", "new-secret"));
+                .thenReturn(new NotificationPreferenceService.ResolvedPreference(true, false, true, false,
+                        null, "https://new.example.com/hook", "new-secret", null));
         when(notificationMapper.selectById(22L)).thenReturn(notification());
 
         NotificationDeliveryService.DeliveryView retried = service.retry(

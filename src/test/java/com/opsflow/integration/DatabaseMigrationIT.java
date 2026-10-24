@@ -43,6 +43,8 @@ class DatabaseMigrationIT {
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("DELETE FROM ticket_satisfaction_responses");
             statement.executeUpdate("DELETE FROM notification_deliveries");
+            statement.executeUpdate("DELETE FROM notification_template_versions");
+            statement.executeUpdate("DELETE FROM notification_templates");
             statement.executeUpdate("DELETE FROM notification_event_preferences");
             statement.executeUpdate("DELETE FROM notification_channel_profiles");
             statement.executeUpdate("DELETE FROM async_dead_letter_messages");
@@ -82,10 +84,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV45() throws SQLException {
+    void appliesEveryMigrationThroughV46() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("45", flyway.info().current().getVersion().getVersion());
-        assertEquals(45, flyway.info().applied().length);
+        assertEquals("46", flyway.info().current().getVersion().getVersion());
+        assertEquals(46, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
@@ -105,6 +107,26 @@ class DatabaseMigrationIT {
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertEquals(5, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = DATABASE()
+                       AND table_name IN ('notification_templates', 'notification_template_versions')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(2, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'notification_deliveries'
+                       AND column_name IN ('template_version_id', 'rendered_title', 'rendered_content')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(3, result.getInt(1));
         }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""

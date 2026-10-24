@@ -31,8 +31,12 @@ public class EmailNotificationChannelAdapter implements NotificationChannelAdapt
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(from.trim());
         message.setTo(context.delivery().getDestination());
-        message.setSubject("[OpsFlow] " + context.notification().getTitle());
-        message.setText(context.notification().getContent());
+        String title = context.delivery().getRenderedTitle() == null
+                ? context.notification().getTitle() : context.delivery().getRenderedTitle();
+        String content = context.delivery().getRenderedContent() == null
+                ? context.notification().getContent() : context.delivery().getRenderedContent();
+        message.setSubject("[OpsFlow] " + title);
+        message.setText(content);
         mailSender.send(message);
         return new DeliveryResult(null);
     }

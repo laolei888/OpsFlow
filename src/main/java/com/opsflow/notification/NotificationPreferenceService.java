@@ -47,6 +47,11 @@ public class NotificationPreferenceService {
         if (command == null) throw new BusinessException("通知偏好不能为空");
         String emailAddress = normalizeEmail(command.emailAddress());
         String webhookUrl = normalizeWebhookUrl(command.webhookUrl());
+        NotificationChannelProfile profile = findProfile(tenantId, userId);
+        String requestedWecomUrl = trim(command.wecomWebhookUrl());
+        String wecomWebhookUrl = Boolean.TRUE.equals(command.clearWecomWebhook()) ? null
+                : requestedWecomUrl == null ? (profile == null ? null : profile.getWecomWebhookUrl())
+                : normalizeWecomWebhookUrl(requestedWecomUrl);
         List<RuleCommand> rules = normalizeRules(command.rules());
         if (rules.stream().anyMatch(RuleCommand::emailEnabled) && emailAddress == null) {
             throw new BusinessException("启用邮件通知前请填写邮件地址");
@@ -54,9 +59,11 @@ public class NotificationPreferenceService {
         if (rules.stream().anyMatch(RuleCommand::webhookEnabled) && webhookUrl == null) {
             throw new BusinessException("启用个人 Webhook 前请填写回调地址");
         }
+        if (rules.stream().anyMatch(RuleCommand::wecomEnabled) && wecomWebhookUrl == null) {
+            throw new BusinessException("启用企业微信通知前请填写群机器人 Webhook 地址");
+        }
 
         PreferenceView before = get(tenantId, userId);
-        NotificationChannelProfile profile = findProfile(tenantId, userId);
         LocalDateTime now = LocalDateTime.now();
         if (profile == null) {
             profile = new NotificationChannelProfile();
@@ -76,6 +83,7 @@ public class NotificationPreferenceService {
         profile.setEmailAddress(emailAddress);
         profile.setWebhookUrl(webhookUrl);
         profile.setWebhookSecret(secret);
+        profile.setWecomWebhookUrl(wecomWebhookUrl);
         profile.setUpdatedAt(now);
         if (profile.getId() == null) profileMapper.insert(profile); else profileMapper.updateById(profile);
 
@@ -90,6 +98,7 @@ public class NotificationPreferenceService {
             preference.setInAppEnabled(rule.inAppEnabled());
             preference.setEmailEnabled(rule.emailEnabled());
             preference.setWebhookEnabled(rule.webhookEnabled());
+            preference.setWecomEnabled(rule.wecomEnabled());
             preference.setCreatedAt(now);
             preference.setUpdatedAt(now);
             preferenceMapper.insert(preference);
@@ -116,10 +125,12 @@ public class NotificationPreferenceService {
         boolean inApp = selected == null || Boolean.TRUE.equals(selected.getInAppEnabled());
         boolean email = selected != null && Boolean.TRUE.equals(selected.getEmailEnabled());
         boolean webhook = selected != null && Boolean.TRUE.equals(selected.getWebhookEnabled());
-        return new ResolvedPreference(inApp, email, webhook,
+        boolean wecom = selected != null && Boolean.TRUE.equals(selected.getWecomEnabled());
+        return new ResolvedPreference(inApp, email, webhook, wecom,
                 profile == null ? null : profile.getEmailAddress(),
                 profile == null ? null : profile.getWebhookUrl(),
-                profile == null ? null : profile.getWebhookSecret());
+                profile == null ? null : profile.getWebhookSecret(),
+                profile == null ? null : profile.getWecomWebhookUrl());
     }
 
     private NotificationChannelProfile findProfile(Long tenantId, Long userId) {
@@ -131,12 +142,14 @@ public class NotificationPreferenceService {
     private PreferenceView toView(NotificationChannelProfile profile, List<RuleView> rules) {
         return new PreferenceView(profile == null ? null : profile.getEmailAddress(),
                 profile == null ? null : profile.getWebhookUrl(),
-                maskSecret(profile == null ? null : profile.getWebhookSecret()), rules);
+                maskSecret(profile == null ? null : profile.getWebhookSecret()),
+                maskWecomUrl(profile == null ? null : profile.getWecomWebhookUrl()), rules);
     }
 
     private RuleView toRuleView(NotificationEventPreference preference) {
         return new RuleView(preference.getEventType(), Boolean.TRUE.equals(preference.getInAppEnabled()),
-                Boolean.TRUE.equals(preference.getEmailEnabled()), Boolean.TRUE.equals(preference.getWebhookEnabled()));
+                Boolean.TRUE.equals(preference.getEmailEnabled()), Boolean.TRUE.equals(preference.getWebhookEnabled()),
+                Boolean.TRUE.equals(preference.getWecomEnabled()));
     }
 
     private List<RuleCommand> normalizeRules(List<RuleCommand> source) {
@@ -146,11 +159,12 @@ public class NotificationPreferenceService {
         for (RuleCommand rule : incoming) {
             if (rule == null) continue;
             String type = normalizeEventType(rule.eventType(), true);
-            if (unique.put(type, new RuleCommand(type, rule.inAppEnabled(), rule.emailEnabled(), rule.webhookEnabled())) != null) {
+            if (unique.put(type, new RuleCommand(type, rule.inAppEnabled(), rule.emailEnabled(), rule.webhookEnabled(),
+                    rule.wecomEnabled())) != null) {
                 throw new BusinessException("通知事件规则不能重复：" + type);
             }
         }
-        unique.putIfAbsent("*", new RuleCommand("*", true, false, false));
+        unique.putIfAbsent("*", new RuleCommand("*", true, false, false, false));
         return unique.values().stream()
                 .sorted(Comparator.comparing(rule -> "*".equals(rule.eventType()) ? "" : rule.eventType()))
                 .toList();
@@ -170,6 +184,26 @@ public class NotificationPreferenceService {
         if (result == null) return null;
         if (result.length() > 1000) throw new BusinessException("Webhook URL 不能超过 1000 个字符");
         outboundUrlPolicy.validate(result);
+        return result;
+    }
+
+    private String normalizeWecomWebhookUrl(String value) {
+        String result = normalizeWebhookUrl(value);
+        if (result == null) return null;
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(result);
+        } catch (IllegalArgumentException invalid) {
+            throw new BusinessException("企业微信机器人 Webhook 地址格式无效");
+        }
+        String host = uri.getHost();
+        String path = uri.getPath();
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null
+                || !(host.equalsIgnoreCase("qyapi.weixin.qq.com") || host.equalsIgnoreCase("webhook.weixin.qq.com"))
+                || path == null || !path.startsWith("/cgi-bin/webhook/send")
+                || uri.getQuery() == null || !uri.getQuery().contains("key=")) {
+            throw new BusinessException("企业微信机器人地址必须使用官方 HTTPS Webhook");
+        }
         return result;
     }
 
@@ -234,6 +268,22 @@ public class NotificationPreferenceService {
         return "••••••••" + value.substring(value.length() - visible);
     }
 
+    private String maskWecomUrl(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            String query = uri.getQuery();
+            String key = query == null ? null : java.util.Arrays.stream(query.split("&"))
+                    .filter(item -> item.startsWith("key="))
+                    .map(item -> item.substring(4))
+                    .findFirst().orElse(null);
+            String suffix = key == null || key.isBlank() ? "" : key.substring(Math.max(0, key.length() - 4));
+            return uri.getScheme() + "://" + uri.getHost() + uri.getPath() + "?key=••••••••" + suffix;
+        } catch (IllegalArgumentException invalid) {
+            return "企业微信机器人已配置";
+        }
+    }
+
     private String trim(String value) {
         if (value == null) return null;
         String result = value.trim();
@@ -241,21 +291,24 @@ public class NotificationPreferenceService {
     }
 
     private RuleView defaultRule() {
-        return new RuleView("*", true, false, false);
+        return new RuleView("*", true, false, false, false);
     }
 
     public record PreferenceCommand(String emailAddress, String webhookUrl, String webhookSecret,
+                                    String wecomWebhookUrl, Boolean clearWecomWebhook,
                                     List<RuleCommand> rules) { }
 
     public record RuleCommand(String eventType, boolean inAppEnabled, boolean emailEnabled,
-                              boolean webhookEnabled) { }
+                              boolean webhookEnabled, boolean wecomEnabled) { }
 
     public record PreferenceView(String emailAddress, String webhookUrl, String webhookSecretPreview,
+                                 String wecomWebhookUrlPreview,
                                  List<RuleView> rules) { }
 
     public record RuleView(String eventType, boolean inAppEnabled, boolean emailEnabled,
-                           boolean webhookEnabled) { }
+                           boolean webhookEnabled, boolean wecomEnabled) { }
 
     public record ResolvedPreference(boolean inAppEnabled, boolean emailEnabled, boolean webhookEnabled,
-                                     String emailAddress, String webhookUrl, String webhookSecret) { }
+                                     boolean wecomEnabled, String emailAddress, String webhookUrl,
+                                     String webhookSecret, String wecomWebhookUrl) { }
 }

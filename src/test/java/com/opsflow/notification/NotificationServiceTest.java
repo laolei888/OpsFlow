@@ -23,7 +23,7 @@ class NotificationServiceTest {
     void createsIdempotentNotificationForConsumer() {
         when(notificationMapper.selectCount(any())).thenReturn(0L);
         NotificationPreferenceService.ResolvedPreference preference = new NotificationPreferenceService.ResolvedPreference(
-                true, false, false, null, null, null);
+                true, false, false, false, null, null, null, null);
         when(deliveryService.resolve(1L, 8L, "SLA_OVERDUE")).thenReturn(preference);
 
         boolean created = notificationService.notifyIfAbsent(1L, 8L, 21L,
