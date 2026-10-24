@@ -3,7 +3,10 @@ package com.opsflow.config;
 import tools.jackson.databind.ObjectMapper;
 import com.opsflow.auth.JwtAuthenticationFilter;
 import com.opsflow.common.ApiResponse;
+import com.opsflow.identity.OidcAuthenticationFailureHandler;
+import com.opsflow.identity.OidcAuthenticationSuccessHandler;
 import com.opsflow.security.OpsFlowSecurityProperties;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -14,6 +17,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -32,14 +36,20 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain apiSecurity(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
                                            OpsFlowSecurityProperties properties,
-                                           ObjectMapper objectMapper) throws Exception {
-        return http.csrf(AbstractHttpConfigurer::disable)
+                                           ObjectMapper objectMapper,
+                                           ObjectProvider<ClientRegistrationRepository> registrations,
+                                           OidcAuthenticationSuccessHandler oidcSuccessHandler,
+                                           OidcAuthenticationFailureHandler oidcFailureHandler) throws Exception {
+        boolean oidcConfigured = registrations.getIfAvailable() != null;
+        http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session -> session.sessionCreationPolicy(
+                        oidcConfigured ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
                     auth.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico",
                                 "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/alert-ingest/**",
+                                "/api/v1/auth/sso/**", "/oauth2/**", "/login/oauth2/**", "/sso/callback",
                                 "/status", "/api/v1/status-page", "/api/v1/status-page/**",
                                 "/docs", "/docs/**", "/swagger-ui/**", "/api-docs", "/api-docs/**",
                                 "/actuator/health").permitAll();
@@ -63,8 +73,13 @@ public class SecurityConfig {
                             objectMapper.writeValue(response.getWriter(),
                                     new ApiResponse<>(false, null, "当前账号没有此操作权限"));
                         }))
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                .build();
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        if (oidcConfigured) {
+            http.oauth2Login(oauth -> oauth
+                    .successHandler(oidcSuccessHandler)
+                    .failureHandler(oidcFailureHandler));
+        }
+        return http.build();
     }
 
     @Bean

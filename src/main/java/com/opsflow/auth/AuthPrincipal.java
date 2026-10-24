@@ -22,4 +22,9 @@ public record AuthPrincipal(Long id, Long tenantId, String username,
                 .anyMatch(expected -> authorities.stream()
                         .anyMatch(authority -> expected.equals(authority.getAuthority())));
     }
+
+    public boolean hasPermission(String permission) {
+        String expected = permission.startsWith("PERM_") ? permission : "PERM_" + permission;
+        return authorities.stream().anyMatch(authority -> expected.equals(authority.getAuthority()));
+    }
 }

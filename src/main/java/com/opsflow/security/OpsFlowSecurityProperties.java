@@ -27,6 +27,8 @@ public class OpsFlowSecurityProperties {
     private final RateLimit rateLimit = new RateLimit();
     @Valid
     private final OutboundRequests outboundRequests = new OutboundRequests();
+    @Valid
+    private final Oidc oidc = new Oidc();
 
     @Getter
     @Setter
@@ -61,5 +63,13 @@ public class OpsFlowSecurityProperties {
         private boolean allowHttp = true;
         private boolean allowPrivateNetworks = false;
         private String allowedHosts = "";
+    }
+
+    @Getter
+    @Setter
+    public static class Oidc {
+        private String frontendCallbackPath = "/sso/callback";
+        private Duration exchangeTtl = Duration.ofMinutes(2);
+        private Duration exchangeRetention = Duration.ofHours(24);
     }
 }

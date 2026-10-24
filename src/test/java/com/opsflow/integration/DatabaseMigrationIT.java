@@ -47,6 +47,10 @@ class DatabaseMigrationIT {
             statement.executeUpdate("DELETE FROM notification_templates");
             statement.executeUpdate("DELETE FROM notification_event_preferences");
             statement.executeUpdate("DELETE FROM notification_channel_profiles");
+            statement.executeUpdate("DELETE FROM oidc_login_exchanges");
+            statement.executeUpdate("DELETE FROM user_permission_overrides");
+            statement.executeUpdate("DELETE FROM user_external_identities");
+            statement.executeUpdate("DELETE FROM oidc_provider_mappings");
             statement.executeUpdate("DELETE FROM async_dead_letter_messages");
             statement.executeUpdate("DELETE FROM async_message_outbox");
         }
@@ -84,10 +88,32 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV46() throws SQLException {
+    void appliesEveryMigrationThroughV47() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("46", flyway.info().current().getVersion().getVersion());
-        assertEquals(46, flyway.info().applied().length);
+        assertEquals("47", flyway.info().current().getVersion().getVersion());
+        assertEquals(47, flyway.info().applied().length);
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = DATABASE()
+                       AND table_name IN ('oidc_provider_mappings', 'user_external_identities',
+                                          'oidc_login_exchanges', 'permissions', 'role_permissions',
+                                          'user_permission_overrides')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(6, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'users'
+                       AND column_name IN ('email', 'auth_source', 'last_login_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(3, result.getInt(1));
+        }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns

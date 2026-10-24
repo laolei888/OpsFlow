@@ -15,6 +15,14 @@ button { cursor: pointer; border: 0; }
 .brand-mark.small { width: 38px; height: 38px; border-radius: 11px; font-size: 13px; box-shadow: none; }
 .login-page { min-height: 100vh; display: grid; grid-template-columns: minmax(400px, .9fr) minmax(520px, 1.1fr); overflow: hidden; background: #f6f8fc; }
 .login-card { width: min(430px, calc(100% - 64px)); margin: auto; }
+.sso-login-block { margin-top: 18px; }
+.sso-divider { display: flex; align-items: center; gap: 10px; margin: 13px 0; color: #95a0af; font-size: 10px; }
+.sso-divider::before, .sso-divider::after { height: 1px; flex: 1; background: #e1e6ec; content: ''; }
+.sso-provider-button { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; margin-top: 8px; padding: 10px 12px; border: 1px solid #d9e1e9; border-radius: 10px; color: #354960; background: #fff; font-size: 10px; font-weight: 800; text-decoration: none; transition: .2s ease; }
+.sso-provider-button:hover { border-color: #7d8fe0; box-shadow: 0 8px 20px rgba(72,91,157,.1); transform: translateY(-1px); }
+.sso-provider-button > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; color: #5369c7; background: #e9edff; }
+.sso-provider-button b { color: #697bd0; font-size: 8px; }
+.sso-loading { color: #8d99a8; font-size: 9px; text-align: center; }
 .login-card h1 { max-width: 420px; margin: 22px 0 12px; color: #14213d; font-size: clamp(32px, 4vw, 48px); line-height: 1.13; letter-spacing: -2px; }
 .login-subtitle { color: #74819a; line-height: 1.7; margin: 0 0 32px; }
 .login-form { display: grid; gap: 17px; }

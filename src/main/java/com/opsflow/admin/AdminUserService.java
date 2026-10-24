@@ -2,6 +2,7 @@ package com.opsflow.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.auth.AuthService;
+import com.opsflow.auth.AuthSource;
 import com.opsflow.auth.RoleMapper;
 import com.opsflow.auth.User;
 import com.opsflow.auth.UserMapper;
@@ -65,6 +66,7 @@ public class AdminUserService {
         user.setUsername(normalizedUsername);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setDisplayName(normalizedDisplayName);
+        user.setAuthSource(AuthSource.LOCAL);
         user.setTenantId(tenantId);
         user.setStatus(UserStatus.ACTIVE);
         user.setTokenVersion(0);
@@ -151,7 +153,8 @@ public class AdminUserService {
 
     private AdminUserView toView(User user) {
         return new AdminUserView(user.getId(), user.getUsername(), user.getDisplayName(),
-                user.getTenantId(), user.getStatus(), authService.rolesOf(user.getId()), user.getCreatedAt());
+                user.getTenantId(), user.getStatus(), authService.rolesOf(user.getId()),
+                user.getAuthSource(), user.getEmail(), user.getLastLoginAt(), user.getCreatedAt());
     }
 
     private void assignRole(Long userId, Long roleId) {

@@ -18,11 +18,14 @@ const StatusPageCenter = defineAsyncComponent(() => import('./components/StatusP
 const StatusPagePublic = defineAsyncComponent(() => import('./components/StatusPagePublic.vue'))
 const SupportGroupCenter = defineAsyncComponent(() => import('./components/SupportGroupCenter.vue'))
 const CustomerSatisfactionCenter = defineAsyncComponent(() => import('./components/CustomerSatisfactionCenter.vue'))
+const IdentityAccessCenter = defineAsyncComponent(() => import('./components/IdentityAccessCenter.vue'))
 
 const TOKEN_KEY = 'opsflow_token'
 const USER_KEY = 'opsflow_user'
 const token = ref(localStorage.getItem(TOKEN_KEY) || '')
 const user = ref(JSON.parse(localStorage.getItem(USER_KEY) || 'null'))
+const ssoProviders = ref([])
+const ssoLoading = ref(false)
 const isPublicStatusPage = window.location.pathname === '/status'
 const activeView = ref('overview')
 const globalSearchRef = ref(null)
@@ -758,13 +761,60 @@ async function signIn() {
   error.value = ''
   try {
     const data = await api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(loginForm) })
-    token.value = data.token
-    user.value = data
-    localStorage.setItem(TOKEN_KEY, data.token)
-    localStorage.setItem(USER_KEY, JSON.stringify(data))
+    establishSession(data)
     await loadDashboard()
   } catch (err) {
     error.value = err.message
+  } finally {
+    loading.value = false
+  }
+}
+
+function establishSession(data) {
+  token.value = data.token
+  user.value = data
+  localStorage.setItem(TOKEN_KEY, data.token)
+  localStorage.setItem(USER_KEY, JSON.stringify(data))
+}
+
+async function loadSsoProviders() {
+  ssoLoading.value = true
+  try {
+    ssoProviders.value = await api('/api/v1/auth/sso/providers') || []
+  } catch (err) {
+    ssoProviders.value = []
+  } finally {
+    ssoLoading.value = false
+  }
+}
+
+async function completeSsoLogin() {
+  const params = new URLSearchParams(window.location.search)
+  const exchangeCode = params.get('code')
+  const providerError = params.get('error')
+  window.history.replaceState({}, '', '/')
+  if (providerError) {
+    error.value = providerError === 'account_mapping_failed'
+      ? '企业身份已验证，但账号不满足当前租户的准入策略，请联系管理员'
+      : '企业身份认证失败，请重新尝试或使用本地账号登录'
+    await loadSsoProviders()
+    return
+  }
+  if (!exchangeCode) {
+    error.value = '单点登录回调缺少交换码，请重新登录'
+    await loadSsoProviders()
+    return
+  }
+  loading.value = true
+  try {
+    const data = await api('/api/v1/auth/sso/exchange', {
+      method: 'POST', body: JSON.stringify({ code: exchangeCode })
+    })
+    establishSession(data)
+    await loadDashboard()
+  } catch (err) {
+    error.value = err.message
+    await loadSsoProviders()
   } finally {
     loading.value = false
   }
@@ -2645,7 +2695,16 @@ async function restoreArticle(article) {
     notify('知识文章已恢复为草稿')
   } catch (err) { error.value = err.message }
 }
-onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
+onMounted(async () => {
+  if (isPublicStatusPage) return
+  if (window.location.pathname === '/sso/callback') {
+    await completeSsoLogin()
+  } else if (token.value) {
+    await loadDashboard()
+  } else {
+    await loadSsoProviders()
+  }
+})
 </script>
 
 <template>
@@ -2663,6 +2722,16 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
           <p v-if="error" class="form-error">{{ error }}</p>
           <button class="primary-button" :disabled="loading">{{ loading ? '登录中…' : '进入工作台' }}</button>
         </form>
+        <div v-if="ssoLoading || ssoProviders.length" class="sso-login-block">
+          <div class="sso-divider"><span>或使用企业身份</span></div>
+          <p v-if="ssoLoading" class="sso-loading">正在读取企业登录入口…</p>
+          <a v-for="provider in ssoProviders" v-else :key="provider.registrationId"
+             class="sso-provider-button" :href="provider.authorizationUrl">
+            <span>{{ provider.displayName.slice(0, 1) }}</span>
+            使用 {{ provider.displayName }} 登录
+            <b>SSO →</b>
+          </a>
+        </div>
         <p class="demo-hint">请使用自行注册或管理员分配的账号登录</p>
       </div>
       <div class="login-side"><p class="eyebrow">OPS / FLOW / 01</p><h2>把“有人跟进”<br /><span>变成可观测的流程。</span></h2><div class="signal-card"><i></i>系统运行正常<strong>99.9%</strong></div></div>
@@ -2692,7 +2761,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
       </aside>
 
       <div class="content-area">
-        <header class="topbar"><div><p class="eyebrow">{{ pageEyebrow }}</p><h1>{{ pageTitle }}</h1></div><div class="topbar-user"><div class="notification-wrap"><button class="notification-button" @click="toggleNotifications" aria-label="打开通知中心">♢<b v-if="notificationUnread">{{ notificationUnread > 99 ? '99+' : notificationUnread }}</b></button><div v-if="showNotifications" class="notification-popover"><div class="notification-header"><strong>通知中心</strong><div><button class="notification-scan" @click.stop="showNotificationPreferences = true; showNotifications = false">渠道偏好</button><button v-if="canBulkUpdate" class="notification-scan" @click.stop="runSlaScan">扫描 SLA</button><button class="notification-scan" @click.stop="markAllNotifications">全部已读</button></div></div><div v-if="loadingNotifications" class="notification-empty">正在加载通知…</div><div v-else-if="!notifications.length" class="notification-empty">暂无通知</div><button v-for="notification in notifications" v-else :key="notification.id" :class="['notification-item', { unread: !notification.readAt }]" @click="openNotification(notification)"><i></i><div><strong>{{ notification.title }}</strong><p>{{ notification.content }}</p><small>{{ formatDate(notification.createdAt) }}</small></div></button><div class="notification-footer">支持站内信、邮件与签名 Webhook · 仅展示最近 20 条</div></div></div><div class="avatar">{{ displayName.slice(0, 1) }}</div><div><strong>{{ displayName }}</strong><small>{{ user?.roles?.join(' · ') || 'REQUESTER' }}</small></div><button class="account-action" @click="showPasswordModal = true">修改密码</button></div></header>
+        <header class="topbar"><div><p class="eyebrow">{{ pageEyebrow }}</p><h1>{{ pageTitle }}</h1></div><div class="topbar-user"><div class="notification-wrap"><button class="notification-button" @click="toggleNotifications" aria-label="打开通知中心">♢<b v-if="notificationUnread">{{ notificationUnread > 99 ? '99+' : notificationUnread }}</b></button><div v-if="showNotifications" class="notification-popover"><div class="notification-header"><strong>通知中心</strong><div><button class="notification-scan" @click.stop="showNotificationPreferences = true; showNotifications = false">渠道偏好</button><button v-if="canBulkUpdate" class="notification-scan" @click.stop="runSlaScan">扫描 SLA</button><button class="notification-scan" @click.stop="markAllNotifications">全部已读</button></div></div><div v-if="loadingNotifications" class="notification-empty">正在加载通知…</div><div v-else-if="!notifications.length" class="notification-empty">暂无通知</div><button v-for="notification in notifications" v-else :key="notification.id" :class="['notification-item', { unread: !notification.readAt }]" @click="openNotification(notification)"><i></i><div><strong>{{ notification.title }}</strong><p>{{ notification.content }}</p><small>{{ formatDate(notification.createdAt) }}</small></div></button><div class="notification-footer">支持站内信、邮件与签名 Webhook · 仅展示最近 20 条</div></div></div><div class="avatar">{{ displayName.slice(0, 1) }}</div><div><strong>{{ displayName }}</strong><small>{{ user?.roles?.join(' · ') || 'REQUESTER' }}{{ user?.authSource === 'OIDC' ? ' · 企业身份' : '' }}</small></div><button v-if="user?.authSource !== 'OIDC'" class="account-action" @click="showPasswordModal = true">修改密码</button></div></header>
         <p v-if="error" class="page-error">{{ error }} <button @click="error = ''">×</button></p>
 
         <section v-if="activeView === 'overview'" class="view-panel">
@@ -2875,6 +2944,7 @@ onMounted(() => { if (token.value && !isPublicStatusPage) loadDashboard() })
         <div class="modal-actions"><button type="button" class="secondary-button" @click="closeAutomationModal">取消</button><button class="primary-button" :disabled="savingAutomationRule">{{ savingAutomationRule ? '保存中…' : '保存规则' }}</button></div>
       </form>
     </div>
+    <IdentityAccessCenter v-if="token && activeView === 'team'" :api="api" :users="teamUsers" />
     <NotificationPreferenceModal :visible="showNotificationPreferences" :api="api" @close="showNotificationPreferences = false" @saved="notify('通知偏好已保存')" />
     <transition name="toast"><div v-if="toast" class="toast-message">✓ {{ toast }}</div></transition>
   </main>

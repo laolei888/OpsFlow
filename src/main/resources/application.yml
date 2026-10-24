@@ -138,6 +138,12 @@ opsflow:
       allow-http: ${OPSFLOW_OUTBOUND_ALLOW_HTTP:true}
       allow-private-networks: ${OPSFLOW_OUTBOUND_ALLOW_PRIVATE_NETWORKS:false}
       allowed-hosts: ${OPSFLOW_OUTBOUND_ALLOWED_HOSTS:}
+    oidc:
+      frontend-callback-path: ${OPSFLOW_OIDC_CALLBACK_PATH:/sso/callback}
+      exchange-ttl: ${OPSFLOW_OIDC_EXCHANGE_TTL:PT2M}
+      exchange-retention: ${OPSFLOW_OIDC_EXCHANGE_RETENTION:PT24H}
+      cleanup-interval-ms: ${OPSFLOW_OIDC_CLEANUP_INTERVAL_MS:3600000}
+      cleanup-initial-delay-ms: ${OPSFLOW_OIDC_CLEANUP_INITIAL_DELAY_MS:60000}
   observability:
     slow-request-threshold: ${OPSFLOW_SLOW_REQUEST_THRESHOLD:500ms}
   bootstrap:

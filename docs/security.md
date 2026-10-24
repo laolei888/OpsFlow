@@ -13,6 +13,11 @@
 - 登录按来源 IP 使用 Redis 原子计数限流；同一账号连续失败达到阈值后进入临时锁定。
 - Redis 暂时不可用时切换到进程内保护，Redis 恢复后仍会先检查本机产生的账号锁定。
 - 查询不存在账号时仍执行一次固定 BCrypt 校验，减少账号枚举的时序差异。
+- 可选 OIDC 登录由 Spring Security 完成授权码与 ID Token 校验；Client Secret 只通过部署配置注入，不进入 OpsFlow 业务表、管理 API 或审计快照。
+- OIDC 回调不会把业务 JWT 放入查询参数，而是签发随机 256 位一次性交换码；数据库只保存 SHA-256 摘要，默认 2 分钟过期并在事务锁内消费一次。
+- 外部身份使用 `providerId + subject` 唯一绑定，不根据同名用户名或邮箱隐式关联本地账号，降低账号接管风险。
+- OIDC 租户映射可限制邮箱域名和必须所属用户组；首次自动开户默认角色由租户管理员明确配置。
+- 业务权限由角色默认集与用户级 ALLOW/DENY 覆盖合并，DENY 优先；权限变更使目标用户全部旧 JWT 失效。
 
 ### HTTP 与接口边界
 
@@ -50,6 +55,10 @@ JWT_SECRET=<at-least-32-random-bytes>
 OPSFLOW_CORS_ALLOWED_ORIGINS=https://opsflow.example.com
 ```
 
+如启用 OIDC，还需通过 Spring Security OAuth2 Client 配置注入 `client-id`、`client-secret`、
+`issuer-uri` 和 `scope`，并在身份提供商登记 `{baseUrl}/login/oauth2/code/{registrationId}`
+回调地址。完整示例见 [oidc.md](oidc.md)。
+
 建议同时显式确认：
 
 ```text
@@ -69,6 +78,8 @@ OPSFLOW_OUTBOUND_ALLOW_PRIVATE_NETWORKS=false
 - [ ] JWT、数据库、Redis、Grafana 密钥均已替换且未进入版本库。
 - [ ] 仅配置实际使用的 CORS 来源，不包含 `*`。
 - [ ] 公开注册、API 文档和公开指标已关闭。
+- [ ] OIDC 回调地址仅使用 HTTPS，Client Secret 由 Secret 管理系统注入且未进入镜像、仓库或截图。
+- [ ] OIDC 邮箱域名/用户组准入、默认角色和自动开户策略已按租户复核，并保留至少一个本地应急管理员。
 - [ ] Webhook 出站域名已形成允许列表，网络层同步限制出站访问。
 - [ ] 反向代理配置 TLS、请求体上限、可信代理来源和访问日志脱敏。
 - [ ] `mvn verify`、前端构建、`quality/security-smoke.mjs` 与容器运行验收均通过。

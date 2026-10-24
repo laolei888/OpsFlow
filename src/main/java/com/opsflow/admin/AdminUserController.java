@@ -53,7 +53,7 @@ public class AdminUserController {
     }
 
     private void requireAdmin(AuthPrincipal principal) {
-        if (principal == null || !principal.hasAnyRole("ADMIN")) {
+        if (principal == null || !principal.hasPermission("USER_MANAGE")) {
             throw new BusinessException("只有管理员可以管理用户");
         }
     }

@@ -37,6 +37,7 @@ public class AuthService {
         user.setUsername(normalizedUsername);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setDisplayName(displayName == null ? "" : displayName.trim());
+        user.setAuthSource(AuthSource.LOCAL);
         user.setTenantId(1L);
         user.setStatus(UserStatus.ACTIVE);
         user.setTokenVersion(0);
@@ -48,6 +49,7 @@ public class AuthService {
         return response(user);
     }
 
+    @Transactional
     public AuthResponse login(String username, String password) {
         String normalizedUsername = normalizeUsername(username);
         User user = userMapper.selectByUsername(normalizedUsername);
@@ -55,9 +57,13 @@ public class AuthService {
             passwordEncoder.matches(password == null ? "" : password, dummyPasswordHash());
             throw new BusinessException("用户名或密码错误");
         }
-        if (user.getStatus() != UserStatus.ACTIVE || !passwordEncoder.matches(password, user.getPasswordHash())) {
+        if (user.getStatus() != UserStatus.ACTIVE || user.getPasswordHash() == null
+                || !passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new BusinessException("用户名或密码错误");
         }
+        user.setLastLoginAt(LocalDateTime.now());
+        user.setUpdatedAt(user.getLastLoginAt());
+        userMapper.updateById(user);
         user.setRoles(rolesOf(user.getId()));
         return response(user);
     }
@@ -71,7 +77,10 @@ public class AuthService {
     @Transactional
     public void changePassword(Long userId, String currentPassword, String newPassword) {
         User user = userMapper.selectById(userId);
-        if (user == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+        if (user == null || user.getPasswordHash() == null) {
+            throw new BusinessException("当前账号由企业身份提供商管理，请通过单点登录认证");
+        }
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new BusinessException("当前密码不正确");
         }
         passwordPolicy.validate(newPassword, user.getUsername());
@@ -88,6 +97,15 @@ public class AuthService {
 
     public List<String> rolesOf(Long userId) {
         return roleMapper.selectCodesByUserId(userId);
+    }
+
+    public AuthResponse issueResponse(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException("账号不存在或已停用");
+        }
+        user.setRoles(rolesOf(userId));
+        return response(user);
     }
 
     public List<StaffSummary> staffMembers(Long tenantId) {
@@ -137,6 +155,7 @@ public class AuthService {
         user.setUsername(canonicalUsername);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setDisplayName(displayName == null || displayName.isBlank() ? "OpsFlow 客服" : displayName.trim());
+        user.setAuthSource(AuthSource.LOCAL);
         user.setTenantId(tenantId == null ? 1L : tenantId);
         user.setStatus(UserStatus.ACTIVE);
         user.setTokenVersion(0);
@@ -167,7 +186,8 @@ public class AuthService {
 
     private AuthResponse response(User user) {
         return new AuthResponse(jwtService.generate(user), jwtService.expiresInSeconds(), user.getId(),
-                user.getUsername(), user.getDisplayName(), user.getTenantId(), user.getRoles());
+                user.getUsername(), user.getDisplayName(), user.getTenantId(), user.getRoles(),
+                user.getAuthSource(), user.getEmail());
     }
 
     private String normalizeUsername(String username) {

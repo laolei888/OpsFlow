@@ -11,7 +11,9 @@
 当前后端 MVP 已包含：
 
 - 现代 Java 后端基线：Java 17、Spring Boot 4.1.1、Spring Framework 7、Jackson 3、Tomcat 11、MyBatis-Plus 3.5.17、RabbitMQ 4.2
-- 用户注册、登录、JWT 无状态认证
+- 用户注册、登录、JWT 无状态认证，并保留本地账号作为企业身份故障回退通道
+- 企业 OIDC 单点登录：身份提供商凭据由部署环境注入，数据库只保存租户映射、邮箱域名/用户组准入与自动开户策略；回调使用 2 分钟有效且仅可消费一次的交换码签发 OpsFlow JWT，避免令牌出现在 URL
+- 数据库化细粒度权限：角色提供默认权限集，管理员可对单个用户显式允许或拒绝；拒绝优先于角色授权，策略变更会递增 tokenVersion 使目标账号旧令牌失效
 - BCrypt 密码存储与 tokenVersion 注销失效
 - 登录接口按来源 IP 限流，账号连续失败自动锁定；Redis 不可用时自动切换本机保护状态
 - 统一密码策略、生产环境必填 JWT/数据库/Redis 密钥，并默认关闭公开注册、接口文档与指标端点
@@ -125,7 +127,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 223 个业务单元测试，不依赖 Docker
+# 243 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -149,7 +151,7 @@ node quality/observability-smoke.mjs
 docker compose --profile quality run --rm --no-deps k6
 ```
 
-`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V44 的全部 Flyway
+`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V47 的全部 Flyway
 迁移、CSAT 唯一约束和数据库聚合查询。Windows 本地环境若无法访问 Docker 命名管道，
 也可以通过 `OPSFLOW_IT_JDBC_URL`、`OPSFLOW_IT_DB_USERNAME` 和
 `OPSFLOW_IT_DB_PASSWORD` 指向一个独立测试数据库；不要连接生产库。
@@ -168,9 +170,13 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 
 安全设计、生产环境变量和上线前检查项见 [docs/security.md](docs/security.md)。
 
+企业 OIDC 注册、租户映射、回调地址和权限覆盖操作见 [docs/oidc.md](docs/oidc.md)。
+
 单机 HTTPS 演示环境、GHCR 镜像与供应链验证流程见 [docs/deployment.md](docs/deployment.md)。
 
 管理台：打开 http://localhost:8081/，使用自行注册或通过环境变量初始化的账号登录。登录页不会预填账号和密码；ADMIN 登录后还会看到“团队管理”工作台。
+
+企业身份：配置 Spring Security OAuth2 Client 后，由 ADMIN 在“团队管理 → 企业身份与细粒度权限”创建同名 `registrationId` 映射。只有服务端凭据与启用中的租户映射同时存在时，登录页才显示对应 SSO 入口；Client Secret 不会保存到业务数据库或通过管理 API 回显。
 
 接口文档：打开 http://localhost:8081/docs，在右上角 `Authorize` 中填入登录接口返回的 JWT，
 即可按业务模块调试受保护接口；原始 OpenAPI JSON 位于 http://localhost:8081/api-docs。
@@ -604,10 +610,10 @@ curl http://localhost:8081/actuator/health
 
 ## 后续迭代计划
 
-1. 增加 SSO/OIDC、组织目录同步与更细粒度的权限策略
-2. 增加对象存储直传、分片上传和隔离文件生命周期策略
-3. 增加通知模板审批流、多语言模板和发送时间窗
-4. 增加故障演练、恢复时间目标和关键链路混沌测试
+1. 增加对象存储直传、分片上传和隔离文件生命周期策略
+2. 增加通知模板审批流、多语言模板和发送时间窗
+3. 增加故障演练、恢复时间目标和关键链路混沌测试
+4. 完成最终验收、演示数据、架构材料与简历交付
 
 通知接口：
 

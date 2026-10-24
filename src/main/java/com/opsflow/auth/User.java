@@ -18,9 +18,12 @@ public class User {
     private String username;
     private String passwordHash;
     private String displayName;
+    private String email;
+    private AuthSource authSource;
     private Long tenantId;
     private UserStatus status;
     private Integer tokenVersion;
+    private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
