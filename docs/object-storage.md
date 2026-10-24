@@ -15,7 +15,7 @@ OpsFlow 的附件业务通过 `AttachmentObjectStore` 适配层与具体介质�
 
 ## 本地 S3 演示
 
-MinIO 已停止发布官方社区容器镜像，因此仓库的开发 profile 使用 RustFS 1.0.3 提供 S3 兼容端点。OpsFlow 只依赖标准 S3 API，连接已有 MinIO、Amazon S3 或其他兼容服务时不需要修改业务代码。
+仓库的开发 profile 使用 RustFS 1.0.3 提供本地 S3 兼容端点。OpsFlow 只依赖标准 S3 API，连接已有 MinIO、Amazon S3 或其他兼容服务时不需要修改业务代码。
 
 在仓库根目录创建不会提交到 Git 的 `.env`：
 
