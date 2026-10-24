@@ -29,7 +29,7 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.demo.yml ps
 curl --fail http://127.0.0.1:8081/actuator/health
 ```
 
-升级时先备份数据库和附件卷，再拉取新镜像：
+升级时先备份数据库和附件卷（或对象桶），再拉取新镜像：
 
 ```bash
 docker compose --env-file deploy/.env.demo -f deploy/docker-compose.demo.yml pull app
@@ -43,6 +43,8 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.demo.yml up 
 应用容器只提供 HTTP。应在主机前方配置 Caddy、Nginx、Traefik 或云负载均衡器终止 TLS，并把请求代理到 `127.0.0.1:8081`。不要把数据库、Redis、Swagger 或 Prometheus 指标直接暴露到公网。
 
 模板启用了生产配置并默认关闭公开注册、Swagger、公开指标、明文及私网出站访问；应用容器同时采用只读根文件系统、固定 UID 10001 的非 root 用户、能力移除和 `no-new-privileges`。一次性 `storage-init` 容器只负责校正附件卷所有权，完成后退出。MySQL、Redis 与 RabbitMQ 均位于不可从宿主机直接访问的内部网络。单机模板中的 JDBC 和 AMQP 流量只经过隔离的 Docker 网络；跨主机或使用托管服务时必须启用服务商提供的 TLS 连接参数。
+
+附件默认保存在本机 `uploads` 卷。正式部署可把 `OPSFLOW_STORAGE_TYPE` 切换为 `S3`，并通过环境变量注入区域、私有桶、端点和工作负载身份或访问密钥。S3 兼容服务若区分容器内外地址，还需分别配置内部 endpoint 和浏览器可访问的 public endpoint。完整参数与迁移边界见 [object-storage.md](object-storage.md)。
 
 ## 4. 镜像供应链
 
@@ -61,6 +63,6 @@ gh attestation verify oci://ghcr.io/laolei888/opsflow:main --repo laolei888/OpsF
 - 使用不可复用的数据库、Redis、RabbitMQ、JWT 和管理员密码。
 - 通过 HTTPS 域名访问，并确认 CORS 只包含该域名。
 - 验证注册、文档和指标端点未对公网开放。
-- 建立 MySQL 与附件卷的定期备份和恢复演练。
+- 建立 MySQL 与附件卷或对象桶的定期备份和恢复演练。
 - 为主机、防火墙、磁盘、证书和容器状态配置外部监控。
 - 正式生产环境应使用托管数据库、Redis、RabbitMQ、高可用编排、集中密钥管理和独立对象存储。

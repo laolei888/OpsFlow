@@ -6,18 +6,12 @@ import com.opsflow.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -35,9 +29,7 @@ public class AttachmentScanService {
     private final AuditLogService auditLogService;
     private final AttachmentSecurityMetrics metrics;
     private final TransactionTemplate transactionTemplate;
-
-    @Value("${opsflow.storage.upload-dir:/app/uploads}")
-    private String uploadDir;
+    private final AttachmentStorageService storageService;
 
     public int scanPending(int batchSize) {
         int safeBatch = Math.max(1, Math.min(batchSize, 100));
@@ -67,8 +59,10 @@ public class AttachmentScanService {
         ScanAttempt attempt = transactionTemplate.execute(status -> claim(attachmentId, tenantId));
         if (attempt == null) return;
         try {
-            AttachmentThreatScanner.ScanResult result = threatScanner.scan(resolveStoredPath(attempt.attachment()),
-                    attempt.attachment());
+            AttachmentThreatScanner.ScanResult result;
+            try (MaterializedAttachment materialized = storageService.materialize(attempt.attachment())) {
+                result = threatScanner.scan(materialized.path(), attempt.attachment());
+            }
             if (result.clean()) {
                 transactionTemplate.executeWithoutResult(status -> completeClean(attempt, result));
                 metrics.clean();
@@ -161,7 +155,7 @@ public class AttachmentScanService {
         AttachmentScanStatus before = attachment.getScanStatus();
         String previousPath = attachment.getStoragePath();
         String cleanPath = cleanRelativePath(attachment);
-        moveWithRollback(resolveStoredPath(attachment), storageRoot().resolve(cleanPath).normalize());
+        moveWithRollback(attachment, cleanPath);
         LocalDateTime now = LocalDateTime.now();
         attachment.setStoragePath(cleanPath);
         attachment.setScanStatus(AttachmentScanStatus.RELEASED);
@@ -205,7 +199,7 @@ public class AttachmentScanService {
         TicketAttachment attachment = currentClaim(attempt);
         if (attachment == null) return;
         String cleanPath = cleanRelativePath(attachment);
-        moveWithRollback(resolveStoredPath(attachment), storageRoot().resolve(cleanPath).normalize());
+        moveWithRollback(attachment, cleanPath);
         LocalDateTime now = LocalDateTime.now();
         attachment.setStoragePath(cleanPath);
         attachment.setScanStatus(AttachmentScanStatus.CLEAN);
@@ -272,58 +266,32 @@ public class AttachmentScanService {
         attachment.setUpdatedAt(now);
     }
 
-    private Path resolveStoredPath(TicketAttachment attachment) {
-        Path root = storageRoot();
-        Path target = root.resolve(attachment.getStoragePath()).normalize();
-        if (!target.startsWith(root)) throw new BusinessException("附件路径非法");
-        return target;
-    }
-
     private String cleanRelativePath(TicketAttachment attachment) {
         return "clean/" + attachment.getTenantId() + "/" + attachment.getTicketId() + "/" + attachment.getStoredName();
     }
 
-    private Path storageRoot() {
-        return Paths.get(uploadDir).toAbsolutePath().normalize();
-    }
-
-    private void move(Path source, Path target) {
-        Path root = storageRoot();
-        if (!source.startsWith(root) || !target.startsWith(root)) throw new BusinessException("附件路径非法");
-        try {
-            Files.createDirectories(target.getParent());
-            if (Files.exists(target)) throw new BusinessException("安全存储目标已存在，请联系管理员");
-            try {
-                Files.move(source, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(source, target);
-            }
-        } catch (BusinessException ex) {
-            throw ex;
-        } catch (IOException ex) {
-            throw new BusinessException("附件从隔离区放行失败");
-        }
-    }
-
-    private void moveWithRollback(Path source, Path target) {
-        move(source, target);
+    private void moveWithRollback(TicketAttachment attachment, String targetKey) {
+        String sourceKey = attachment.getStoragePath();
+        AttachmentStorageType backend = attachment.getStorageBackend() == null
+                ? AttachmentStorageType.LOCAL : attachment.getStorageBackend();
+        storageService.move(attachment, targetKey);
         if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
                 if (status == TransactionSynchronization.STATUS_COMMITTED) return;
                 try {
-                    move(target, source);
+                    storageService.move(backend, targetKey, sourceKey);
                 } catch (RuntimeException ex) {
-                    log.error("Failed to restore attachment file after transaction rollback: {} -> {}", target, source, ex);
+                    log.error("Failed to restore attachment object after transaction rollback: {} -> {}",
+                            targetKey, sourceKey, ex);
                 }
             }
         });
     }
 
     private void requireStoredFile(TicketAttachment attachment) {
-        Path path = resolveStoredPath(attachment);
-        if (!Files.isRegularFile(path) || !Files.isReadable(path)) throw new BusinessException("隔离文件不存在或不可读");
+        if (!storageService.exists(attachment)) throw new BusinessException("隔离文件不存在或不可读");
     }
 
     private String operationReason(String value, String operation) {
@@ -336,7 +304,7 @@ public class AttachmentScanService {
 
     private AttachmentView toView(TicketAttachment item) {
         return new AttachmentView(item.getId(), item.getTicketId(), item.getUploaderId(), item.getOriginalName(),
-                item.getContentType(), item.getSizeBytes(), item.getScanStatus(), item.getScanEngine(),
+                item.getContentType(), item.getSizeBytes(), item.getStorageBackend(), item.getScanStatus(), item.getScanEngine(),
                 item.getScanResult(), item.getSha256(), item.getScanAttempts(), item.getNextScanAt(),
                 item.getScannedAt(), item.getQuarantinedAt(), item.getReleasedBy(), item.getReleasedAt(),
                 item.getReleaseReason(), item.getCreatedAt(), item.getUpdatedAt());
@@ -376,7 +344,8 @@ public class AttachmentScanService {
     private record ScanAttempt(TicketAttachment attachment, int attemptNumber, String claimToken) { }
 
     public record AttachmentView(Long id, Long ticketId, Long uploaderId, String originalName,
-                                 String contentType, Long sizeBytes, AttachmentScanStatus scanStatus,
+                                 String contentType, Long sizeBytes, AttachmentStorageType storageBackend,
+                                 AttachmentScanStatus scanStatus,
                                  String scanEngine, String scanResult, String sha256, Integer scanAttempts,
                                  LocalDateTime nextScanAt, LocalDateTime scannedAt, LocalDateTime quarantinedAt,
                                  Long releasedBy, LocalDateTime releasedAt, String releaseReason,

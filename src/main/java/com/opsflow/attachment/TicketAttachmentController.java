@@ -53,6 +53,15 @@ public class TicketAttachmentController {
                 .body(downloaded.resource());
     }
 
+    @GetMapping("/{attachmentId}/download-url")
+    public ApiResponse<TicketAttachmentService.DownloadAccess> downloadUrl(
+            @PathVariable Long ticketId,
+            @PathVariable Long attachmentId,
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        return ApiResponse.ok(attachmentService.downloadAccess(
+                ticketId, attachmentId, principal.tenantId(), requesterScope(principal)));
+    }
+
     @DeleteMapping("/{attachmentId}")
     public ApiResponse<Void> delete(@PathVariable Long ticketId,
                                     @PathVariable Long attachmentId,

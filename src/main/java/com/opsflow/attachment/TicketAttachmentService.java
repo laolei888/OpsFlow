@@ -3,14 +3,15 @@ package com.opsflow.attachment;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
-import com.opsflow.ticket.Ticket;
 import com.opsflow.ticket.TicketService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -19,10 +20,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +32,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class TicketAttachmentService {
+    private static final Logger log = LoggerFactory.getLogger(TicketAttachmentService.class);
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
             "png", "jpg", "jpeg", "gif", "pdf", "txt", "md", "csv",
             "doc", "docx", "xls", "xlsx", "zip", "log");
@@ -49,12 +49,7 @@ public class TicketAttachmentService {
     private final TicketAttachmentMapper attachmentMapper;
     private final TicketService ticketService;
     private final AuditLogService auditLogService;
-
-    @Value("${opsflow.storage.upload-dir:/app/uploads}")
-    private String uploadDir;
-
-    @Value("${opsflow.storage.max-file-size:10485760}")
-    private long maxFileSize;
+    private final AttachmentStorageService storageService;
 
     public List<TicketAttachment> list(Long ticketId, Long tenantId, Long requesterId) {
         ticketService.getVisible(ticketId, tenantId, requesterId);
@@ -68,6 +63,7 @@ public class TicketAttachmentService {
     public TicketAttachment upload(Long ticketId, Long uploaderId, Long tenantId, Long requesterId, MultipartFile file) {
         ticketService.getVisible(ticketId, tenantId, requesterId);
         if (file == null || file.isEmpty()) throw new BusinessException("请选择要上传的文件");
+        long maxFileSize = storageService.maxFileSize();
         if (file.getSize() > maxFileSize) {
             throw new BusinessException("附件大小不能超过 " + (maxFileSize / 1024 / 1024) + "MB");
         }
@@ -77,15 +73,18 @@ public class TicketAttachmentService {
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             throw new BusinessException("不支持的附件类型，请上传图片、文档、表格、文本或压缩包");
         }
-        String verifiedContentType = verifyContent(file, extension);
+        byte[] content = readContent(file);
+        String verifiedContentType = verifyContent(content, extension);
 
         String storedName = UUID.randomUUID() + "." + extension;
-        Path target = resolvePath(tenantId, ticketId, "quarantine", storedName);
+        String objectKey = relativePath(tenantId, ticketId, "quarantine", storedName);
+        StoredAttachmentObject storedObject;
         try {
-            Files.createDirectories(target.getParent());
-            file.transferTo(target);
-        } catch (IOException | RuntimeException ex) {
-            deleteQuietly(target);
+            storedObject = storageService.put(objectKey, content, verifiedContentType,
+                    Map.of("tenant-id", String.valueOf(tenantId), "ticket-id", String.valueOf(ticketId),
+                            "uploader-id", String.valueOf(uploaderId)));
+        } catch (AttachmentStorageException ex) {
+            log.warn("Attachment upload to {} storage failed", storageService.configuredType(), ex);
             throw new BusinessException("附件保存失败，请稍后重试");
         }
 
@@ -97,7 +96,10 @@ public class TicketAttachmentService {
         attachment.setStoredName(storedName);
         attachment.setContentType(verifiedContentType);
         attachment.setSizeBytes(file.getSize());
-        attachment.setStoragePath(relativePath(tenantId, ticketId, "quarantine", storedName));
+        attachment.setStoragePath(objectKey);
+        attachment.setStorageBackend(storageService.configuredType());
+        attachment.setStorageEtag(storedObject.etag());
+        attachment.setStorageVersion(storedObject.versionId());
         attachment.setScanStatus(AttachmentScanStatus.PENDING);
         attachment.setScanAttempts(0);
         LocalDateTime now = LocalDateTime.now();
@@ -109,11 +111,16 @@ public class TicketAttachmentService {
             attachmentMapper.insert(attachment);
             auditLogService.record(tenantId, uploaderId, "TICKET", ticketId, "ATTACHMENT_ADDED",
                     null, java.util.Map.of("attachmentId", attachment.getId(), "name", originalName,
-                            "scanStatus", AttachmentScanStatus.PENDING),
+                            "scanStatus", AttachmentScanStatus.PENDING,
+                            "storageBackend", attachment.getStorageBackend()),
                     "上传附件并进入安全隔离区");
             return attachment;
         } catch (RuntimeException ex) {
-            deleteQuietly(target);
+            try {
+                storageService.delete(attachment);
+            } catch (RuntimeException cleanupFailure) {
+                ex.addSuppressed(cleanupFailure);
+            }
             throw ex;
         }
     }
@@ -121,20 +128,22 @@ public class TicketAttachmentService {
     public DownloadedAttachment download(Long ticketId, Long attachmentId, Long tenantId, Long requesterId) {
         ticketService.getVisible(ticketId, tenantId, requesterId);
         TicketAttachment attachment = find(ticketId, attachmentId, tenantId);
-        if (attachment.getScanStatus() != AttachmentScanStatus.CLEAN
-                && attachment.getScanStatus() != AttachmentScanStatus.RELEASED) {
-            throw new AttachmentDownloadBlockedException(downloadBlockedMessage(attachment.getScanStatus()));
-        }
-        Path path = resolveStoredPath(attachment);
+        requireDownloadable(attachment);
         try {
-            Resource resource = new UrlResource(path.toUri());
-            if (!resource.exists() || !resource.isReadable()) {
-                throw new BusinessException("附件文件不存在");
-            }
-            return new DownloadedAttachment(attachment, resource);
-        } catch (IOException ex) {
+            return new DownloadedAttachment(attachment, storageService.load(attachment));
+        } catch (AttachmentStorageException ex) {
+            log.warn("Attachment {} cannot be read from {}", attachment.getId(), attachment.getStorageBackend(), ex);
             throw new BusinessException("附件读取失败");
         }
+    }
+
+    public DownloadAccess downloadAccess(Long ticketId, Long attachmentId, Long tenantId, Long requesterId) {
+        ticketService.getVisible(ticketId, tenantId, requesterId);
+        TicketAttachment attachment = find(ticketId, attachmentId, tenantId);
+        requireDownloadable(attachment);
+        return storageService.presignDownload(attachment)
+                .map(signed -> new DownloadAccess(true, signed.uri().toString(), signed.expiresAt()))
+                .orElseGet(() -> new DownloadAccess(false, null, null));
     }
 
     @Transactional
@@ -145,11 +154,11 @@ public class TicketAttachmentService {
         if (!staff && !actorId.equals(attachment.getUploaderId())) {
             throw new BusinessException("只能删除自己上传的附件");
         }
-        deleteQuietly(resolveStoredPath(attachment));
         attachmentMapper.deleteById(attachment.getId());
         auditLogService.record(tenantId, actorId, "TICKET", ticketId, "ATTACHMENT_DELETED",
                 java.util.Map.of("attachmentId", attachment.getId(), "name", attachment.getOriginalName()),
                 null, "删除附件");
+        deleteAfterCommit(attachment);
     }
 
     private TicketAttachment find(Long ticketId, Long attachmentId, Long tenantId) {
@@ -169,24 +178,6 @@ public class TicketAttachmentService {
         return attachment;
     }
 
-    private Path resolvePath(Long tenantId, Long ticketId, String area, String storedName) {
-        Path root = storageRoot();
-        Path target = root.resolve(area)
-                .resolve(String.valueOf(tenantId))
-                .resolve(String.valueOf(ticketId))
-                .resolve(storedName)
-                .normalize();
-        if (!target.startsWith(root)) throw new BusinessException("附件路径非法");
-        return target;
-    }
-
-    private Path resolveStoredPath(TicketAttachment attachment) {
-        Path root = storageRoot();
-        Path target = root.resolve(attachment.getStoragePath()).normalize();
-        if (!target.startsWith(root)) throw new BusinessException("附件路径非法");
-        return target;
-    }
-
     private String relativePath(Long tenantId, Long ticketId, String area, String storedName) {
         return area + "/" + tenantId + "/" + ticketId + "/" + storedName;
     }
@@ -195,10 +186,6 @@ public class TicketAttachmentService {
         if (status == AttachmentScanStatus.INFECTED) return "附件检测到安全威胁，已被隔离";
         if (status == AttachmentScanStatus.FAILED) return "附件安全扫描失败，等待管理员处理";
         return "附件正在安全扫描，暂不可下载";
-    }
-
-    private Path storageRoot() {
-        return Paths.get(uploadDir).toAbsolutePath().normalize();
     }
 
     private String safeOriginalName(String value) {
@@ -223,13 +210,15 @@ public class TicketAttachmentService {
         return name.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
-    private String verifyContent(MultipartFile file, String extension) {
-        final byte[] content;
+    private byte[] readContent(MultipartFile file) {
         try {
-            content = file.getBytes();
+            return file.getBytes();
         } catch (IOException ex) {
             throw new BusinessException("附件内容读取失败");
         }
+    }
+
+    private String verifyContent(byte[] content, String extension) {
         boolean valid = switch (extension) {
             case "png" -> startsWith(content, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
             case "jpg", "jpeg" -> startsWith(content, 0xff, 0xd8, 0xff);
@@ -284,14 +273,33 @@ public class TicketAttachmentService {
         return true;
     }
 
-    private void deleteQuietly(Path path) {
-        if (path == null) return;
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException ignored) {
-            // Do not hide the original request error if cleanup fails.
+    private void requireDownloadable(TicketAttachment attachment) {
+        if (attachment.getScanStatus() != AttachmentScanStatus.CLEAN
+                && attachment.getScanStatus() != AttachmentScanStatus.RELEASED) {
+            throw new AttachmentDownloadBlockedException(downloadBlockedMessage(attachment.getScanStatus()));
         }
     }
 
+    private void deleteAfterCommit(TicketAttachment attachment) {
+        Runnable cleanup = () -> {
+            try {
+                storageService.delete(attachment);
+            } catch (RuntimeException ex) {
+                log.error("Attachment {} database record was deleted but object cleanup failed", attachment.getId(), ex);
+            }
+        };
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            cleanup.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                cleanup.run();
+            }
+        });
+    }
+
     public record DownloadedAttachment(TicketAttachment attachment, Resource resource) { }
+    public record DownloadAccess(boolean direct, String url, Instant expiresAt) { }
 }

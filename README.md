@@ -80,6 +80,7 @@
 - 通知按 tenantId 与 recipientId 隔离，并通过 dedupeKey 避免重复提醒
 - 附件安全中心：所有新附件先写入租户隔离区并进入异步扫描状态机，完成 SHA-256 取证、EICAR/可执行文件特征检查、压缩包路径穿越与高压缩比防护后才移动到安全区；可选接入 ClamAV INSTREAM 协议进行完整病毒扫描
 - 扫描中的附件禁止预览和下载，感染与终态失败文件持续保留在隔离区；管理员可查看扫描引擎、结论、哈希、重试次数与积压摘要，填写原因后重新扫描，或输入完整 SHA-256 执行带审计的高风险人工放行
+- 附件存储适配层：本地卷与 S3/MinIO 可配置切换，每条附件固化存储后端、对象键、ETag 与版本号；历史附件继续从原后端读取，新附件按当前策略写入私有桶，扫描通过后从 `quarantine/` 移动到 `clean/`。S3 下载仅在资源级鉴权与扫描状态校验通过后签发默认 5 分钟有效的预签名地址
 - 容量规划与治理闭环：后台按租户定时采集工单吞吐、SLA 逾期、事件告警、异步消息、附件扫描、存储与 JVM 内存快照；管理员可创建普通快照或关联发布单的长期基线，查看 7-180 天趋势、阈值利用率、线性触顶预测，并逐项比较两个版本的改善与退化；支持租户级八项容量阈值、预警水位和观察周期配置，自动创建/升级/恢复容量预警；维护窗口内保留风险证据但抑制通知，窗口结束后对未确认风险补发提醒，并通过历史风险画像持续统计解决率、平均解决时长与高频风险指标
 - 工单附件上传、列表和删除继续支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件；图片预览复用带 JWT 的安全下载链路
 - ADMIN 团队管理：创建账号、启停用、角色调整，并保护最后一名管理员
@@ -99,7 +100,7 @@
 - 工单创建支持 Idempotency-Key：网络重试或重复点击不会产生重复工单，并校验请求指纹
 - 幂等键按 24 小时保留并由定时任务清理，避免长期占用业务表
 - 全链路响应返回 X-Request-Id，未捕获异常日志带请求标识，便于线上排查
-- Docker 使用独立 opsflow_uploads 卷持久化附件文件
+- Docker 默认使用独立 `opsflow_uploads` 卷持久化附件，也可通过 `object-storage` profile 启动 RustFS 演示完整 S3 链路；应用仍兼容 Amazon S3、MinIO 等标准 S3 服务
 
 ## 启动
 
@@ -112,6 +113,9 @@ docker compose up --build
 
 # 可选：同时启动 ClamAV，并在 .env 中设置 OPSFLOW_ATTACHMENT_CLAMAV_ENABLED=true
 docker compose --profile antivirus up -d --build
+
+# 可选：使用 S3 兼容附件后端，先按 docs/object-storage.md 配置 .env
+docker compose --profile object-storage up -d --build
 
 # 完整可观测栈：额外启用 Prometheus、Tempo、Loki、Alloy、Grafana
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
@@ -127,7 +131,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 243 个业务单元测试，不依赖 Docker
+# 249 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -151,7 +155,7 @@ node quality/observability-smoke.mjs
 docker compose --profile quality run --rm --no-deps k6
 ```
 
-`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V47 的全部 Flyway
+`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V48 的全部 Flyway
 迁移、CSAT 唯一约束和数据库聚合查询。Windows 本地环境若无法访问 Docker 命名管道，
 也可以通过 `OPSFLOW_IT_JDBC_URL`、`OPSFLOW_IT_DB_USERNAME` 和
 `OPSFLOW_IT_DB_PASSWORD` 指向一个独立测试数据库；不要连接生产库。
@@ -171,6 +175,8 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
 安全设计、生产环境变量和上线前检查项见 [docs/security.md](docs/security.md)。
 
 企业 OIDC 注册、租户映射、回调地址和权限覆盖操作见 [docs/oidc.md](docs/oidc.md)。
+
+附件本地卷、S3/MinIO 切换、预签名下载与生产配置见 [docs/object-storage.md](docs/object-storage.md)。
 
 单机 HTTPS 演示环境、GHCR 镜像与供应链验证流程见 [docs/deployment.md](docs/deployment.md)。
 
@@ -286,8 +292,11 @@ curl -X POST -H "Authorization: Bearer <TOKEN>" \
 
     GET    /api/v1/admin/attachment-security
     GET    /api/v1/admin/attachment-security/summary
+    GET    /api/v1/admin/attachment-security/storage
     POST   /api/v1/admin/attachment-security/{id}/retry
     POST   /api/v1/admin/attachment-security/{id}/release
+
+    GET    /api/v1/tickets/{ticketId}/attachments/{attachmentId}/download-url
 
 人工放行必须同时提交不少于 5 个字符的原因和当前记录的完整 64 位 SHA-256；该操作会写入审计日志。
 
@@ -610,7 +619,7 @@ curl http://localhost:8081/actuator/health
 
 ## 后续迭代计划
 
-1. 增加对象存储直传、分片上传和隔离文件生命周期策略
+1. 增加大文件分片直传、断点续传和对象版本回收策略
 2. 增加通知模板审批流、多语言模板和发送时间窗
 3. 增加故障演练、恢复时间目标和关键链路混沌测试
 4. 完成最终验收、演示数据、架构材料与简历交付

@@ -23,6 +23,11 @@ public class TicketAttachment {
     private Long sizeBytes;
     @JsonIgnore
     private String storagePath;
+    private AttachmentStorageType storageBackend;
+    @JsonIgnore
+    private String storageEtag;
+    @JsonIgnore
+    private String storageVersion;
     private AttachmentScanStatus scanStatus;
     private String scanEngine;
     private String scanResult;

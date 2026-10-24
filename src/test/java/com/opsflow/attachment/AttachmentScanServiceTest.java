@@ -7,7 +7,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -34,6 +33,7 @@ class AttachmentScanServiceTest {
     @Mock private AuditLogService auditLogService;
     @Mock private AttachmentSecurityMetrics metrics;
     @Mock private TransactionTemplate transactionTemplate;
+    @Mock private AttachmentStorageService storageService;
 
     @TempDir Path tempDir;
     private AttachmentScanService scanService;
@@ -42,8 +42,7 @@ class AttachmentScanServiceTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         scanService = new AttachmentScanService(attachmentMapper, threatScanner, auditLogService,
-                metrics, transactionTemplate);
-        ReflectionTestUtils.setField(scanService, "uploadDir", tempDir.toString());
+                metrics, transactionTemplate, storageService);
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<Object> callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
@@ -53,6 +52,21 @@ class AttachmentScanServiceTest {
             callback.accept(mock(TransactionStatus.class));
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
+        lenient().when(storageService.materialize(any(TicketAttachment.class))).thenAnswer(invocation -> {
+            TicketAttachment item = invocation.getArgument(0);
+            return new MaterializedAttachment(tempDir.resolve(item.getStoragePath()), () -> { });
+        });
+        lenient().when(storageService.exists(any(TicketAttachment.class))).thenReturn(true);
+        lenient().doAnswer(invocation -> {
+            TicketAttachment item = invocation.getArgument(0);
+            String targetKey = invocation.getArgument(1);
+            Path source = tempDir.resolve(item.getStoragePath());
+            Path target = tempDir.resolve(targetKey);
+            Files.createDirectories(target.getParent());
+            Files.copy(source, target);
+            Files.delete(source);
+            return null;
+        }).when(storageService).move(any(TicketAttachment.class), any(String.class));
     }
 
     @Test
@@ -120,6 +134,7 @@ class AttachmentScanServiceTest {
         attachment.setOriginalName("file.txt");
         attachment.setStoredName("file.txt");
         attachment.setStoragePath("quarantine/1/7/file.txt");
+        attachment.setStorageBackend(AttachmentStorageType.LOCAL);
         attachment.setScanStatus(AttachmentScanStatus.PENDING);
         attachment.setScanAttempts(0);
         attachment.setNextScanAt(LocalDateTime.now().minusSeconds(1));

@@ -3,22 +3,20 @@ package com.opsflow.attachment;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
 import com.opsflow.ticket.TicketService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import java.nio.file.Path;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,17 +28,22 @@ class TicketAttachmentServiceTest {
     private TicketService ticketService;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private AttachmentStorageService storageService;
 
     @InjectMocks
     private TicketAttachmentService attachmentService;
 
-    @TempDir
-    Path tempDir;
+    @BeforeEach
+    void setUp() {
+        lenient().when(storageService.maxFileSize()).thenReturn(10L * 1024 * 1024);
+        lenient().when(storageService.configuredType()).thenReturn(AttachmentStorageType.LOCAL);
+        lenient().when(storageService.put(anyString(), any(byte[].class), anyString(), anyMap()))
+                .thenReturn(new StoredAttachmentObject("etag", null));
+    }
 
     @Test
     void uploadPassesRequesterScopeToTicketVisibilityCheck() {
-        ReflectionTestUtils.setField(attachmentService, "uploadDir", tempDir.toString());
-        ReflectionTestUtils.setField(attachmentService, "maxFileSize", 10L * 1024 * 1024);
         MockMultipartFile file = new MockMultipartFile(
                 "file", "diagnostic.txt", "text/plain", "diagnostic".getBytes());
         when(attachmentMapper.insert(any(TicketAttachment.class))).thenAnswer(invocation -> {
@@ -53,13 +56,12 @@ class TicketAttachmentServiceTest {
         verify(ticketService).getVisible(1L, 1L, 7L);
         verify(attachmentMapper).insert(any(TicketAttachment.class));
         assertEquals(AttachmentScanStatus.PENDING, saved.getScanStatus());
+        assertEquals(AttachmentStorageType.LOCAL, saved.getStorageBackend());
         assertTrue(saved.getStoragePath().startsWith("quarantine/"));
     }
 
     @Test
     void rejectsExecutableContentDisguisedAsImage() {
-        ReflectionTestUtils.setField(attachmentService, "uploadDir", tempDir.toString());
-        ReflectionTestUtils.setField(attachmentService, "maxFileSize", 10L * 1024 * 1024);
         MockMultipartFile file = new MockMultipartFile(
                 "file", "evidence.jpg", "image/jpeg", new byte[]{0x4d, 0x5a, 0x00, 0x00});
 
@@ -68,12 +70,11 @@ class TicketAttachmentServiceTest {
 
         assertEquals("附件实际内容与文件扩展名不匹配", exception.getMessage());
         verify(attachmentMapper, never()).insert(any(TicketAttachment.class));
+        verify(storageService, never()).put(anyString(), any(byte[].class), anyString(), anyMap());
     }
 
     @Test
     void storesVerifiedContentTypeInsteadOfClientProvidedType() {
-        ReflectionTestUtils.setField(attachmentService, "uploadDir", tempDir.toString());
-        ReflectionTestUtils.setField(attachmentService, "maxFileSize", 10L * 1024 * 1024);
         MockMultipartFile file = new MockMultipartFile(
                 "file", "diagnostic.txt", "application/x-msdownload", "safe text".getBytes());
         when(attachmentMapper.insert(any(TicketAttachment.class))).thenAnswer(invocation -> {

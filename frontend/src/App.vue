@@ -1880,6 +1880,14 @@ async function uploadAttachment(event) {
 
 async function downloadAttachment(attachment) {
   try {
+    const access = await api('/api/v1/tickets/' + attachment.ticketId + '/attachments/' + attachment.id + '/download-url')
+    if (access?.direct && access.url) {
+      const link = document.createElement('a')
+      link.href = access.url
+      link.rel = 'noopener'
+      link.click()
+      return
+    }
     const blob = await fetchAttachmentBlob(attachment)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

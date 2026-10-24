@@ -24,6 +24,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AttachmentSecurityController {
     private final AttachmentScanService scanService;
+    private final AttachmentStorageService storageService;
 
     @GetMapping
     public ApiResponse<List<AttachmentScanService.AttachmentView>> list(
@@ -40,6 +41,13 @@ public class AttachmentSecurityController {
             @AuthenticationPrincipal AuthPrincipal principal) {
         requireAdmin(principal);
         return ApiResponse.ok(scanService.summary(principal.tenantId()));
+    }
+
+    @GetMapping("/storage")
+    public ApiResponse<AttachmentStorageService.StorageStatus> storage(
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(storageService.status());
     }
 
     @PostMapping("/{id}/retry")
