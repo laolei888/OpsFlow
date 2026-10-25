@@ -35,8 +35,14 @@ class NotificationDeliveryServiceTest {
                 new NotificationPreferenceService.ResolvedPreference(true, true, true, true,
                         "agent@example.com", "https://notify.example.com/opsflow", "secret",
                         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test");
+        LocalDateTime scheduledAt = LocalDateTime.now().plusHours(2);
+        when(preferenceService.deliveryWindow(org.mockito.ArgumentMatchers.eq(preference),
+                org.mockito.ArgumentMatchers.eq("INCIDENT_DECLARED"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new NotificationPreferenceService.DeliveryWindowDecision(
+                        scheduledAt, true, "发送窗口将在两小时后开启"));
         when(templateService.render(org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> new NotificationTemplateService.RenderedTemplate(null,
                         notification.getTitle(), notification.getContent()));
 
@@ -49,6 +55,8 @@ class NotificationDeliveryServiceTest {
                         NotificationChannel.WEBHOOK, NotificationChannel.WECOM);
         assertThat(captor.getAllValues().get(0).getStatus()).isEqualTo(NotificationDeliveryStatus.DELIVERED);
         assertThat(captor.getAllValues().get(1).getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        assertThat(captor.getAllValues().get(1).getNextAttemptAt()).isEqualTo(scheduledAt);
+        assertThat(captor.getAllValues().get(1).getScheduledReason()).contains("两小时后");
         assertThat(captor.getAllValues().get(2).getDeliverySecret()).isEqualTo("secret");
     }
 
@@ -58,11 +66,18 @@ class NotificationDeliveryServiceTest {
                 preferenceService, templateService, auditLogService, metrics, transactionManager, List.of());
 
         when(templateService.render(org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new NotificationTemplateService.RenderedTemplate(null, "重大事件", "请立即响应"));
 
-        service.plan(notification(), new NotificationPreferenceService.ResolvedPreference(
-                false, false, false, false, null, null, null, null));
+        NotificationPreferenceService.ResolvedPreference preference = new NotificationPreferenceService.ResolvedPreference(
+                false, false, false, false, null, null, null, null);
+        when(preferenceService.deliveryWindow(org.mockito.ArgumentMatchers.eq(preference),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new NotificationPreferenceService.DeliveryWindowDecision(
+                        LocalDateTime.now(), false, null));
+
+        service.plan(notification(), preference);
 
         ArgumentCaptor<NotificationDelivery> captor = ArgumentCaptor.forClass(NotificationDelivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -90,6 +105,10 @@ class NotificationDeliveryServiceTest {
         when(preferenceService.resolve(1L, 7L, "INCIDENT_DECLARED"))
                 .thenReturn(new NotificationPreferenceService.ResolvedPreference(true, false, true, false,
                         null, "https://new.example.com/hook", "new-secret", null));
+        when(preferenceService.deliveryWindow(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("INCIDENT_DECLARED"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new NotificationPreferenceService.DeliveryWindowDecision(
+                        LocalDateTime.now(), false, null));
         when(notificationMapper.selectById(22L)).thenReturn(notification());
 
         NotificationDeliveryService.DeliveryView retried = service.retry(

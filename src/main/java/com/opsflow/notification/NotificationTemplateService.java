@@ -22,17 +22,19 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 public class NotificationTemplateService {
+    public static final String DEFAULT_LOCALE = "zh-CN";
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{\\s*([A-Za-z][A-Za-z0-9_]*)\\s*}}", Pattern.CASE_INSENSITIVE);
     private static final Set<String> ALLOWED_PLACEHOLDERS = Set.of(
             "title", "content", "eventtype", "notificationid", "tenantid", "recipientid", "ticketid", "createdat");
     private static final Set<NotificationChannel> TEMPLATE_CHANNELS = Set.of(
             NotificationChannel.EMAIL, NotificationChannel.WEBHOOK, NotificationChannel.WECOM);
+    private static final Set<String> SUPPORTED_LOCALES = Set.of(DEFAULT_LOCALE, "en-US");
 
     private final NotificationTemplateMapper templateMapper;
     private final NotificationTemplateVersionMapper versionMapper;
     private final AuditLogService auditLogService;
 
-    public List<TemplateView> list(Long tenantId, String eventType, NotificationChannel channel) {
+    public List<TemplateView> list(Long tenantId, String eventType, NotificationChannel channel, String locale) {
         LambdaQueryWrapper<NotificationTemplate> query = new LambdaQueryWrapper<NotificationTemplate>()
                 .eq(NotificationTemplate::getTenantId, tenantId)
                 .orderByDesc(NotificationTemplate::getUpdatedAt)
@@ -40,7 +42,13 @@ public class NotificationTemplateService {
         String normalizedType = trim(eventType);
         if (normalizedType != null) query.eq(NotificationTemplate::getEventType, normalizeEventType(normalizedType, true));
         if (channel != null) query.eq(NotificationTemplate::getChannel, requireTemplateChannel(channel));
+        String normalizedLocale = normalizeLocale(locale, false);
+        if (normalizedLocale != null) query.eq(NotificationTemplate::getLocale, normalizedLocale);
         return templateMapper.selectList(query).stream().map(this::toView).toList();
+    }
+
+    public List<TemplateView> list(Long tenantId, String eventType, NotificationChannel channel) {
+        return list(tenantId, eventType, channel, null);
     }
 
     public TemplateDetailView detail(Long id, Long tenantId) {
@@ -60,12 +68,14 @@ public class NotificationTemplateService {
         String description = optionalText(command.description(), "模板说明", 500);
         String eventType = normalizeEventType(command.eventType(), true);
         NotificationChannel channel = requireTemplateChannel(command.channel());
+        String locale = normalizeLocale(command.locale(), true);
         validateTemplate(command.titleTemplate(), command.contentTemplate());
         if (templateMapper.selectCount(new LambdaQueryWrapper<NotificationTemplate>()
                 .eq(NotificationTemplate::getTenantId, tenantId)
                 .eq(NotificationTemplate::getEventType, eventType)
-                .eq(NotificationTemplate::getChannel, channel)) > 0) {
-            throw new BusinessException("该事件和渠道已经存在通知模板");
+                .eq(NotificationTemplate::getChannel, channel)
+                .eq(NotificationTemplate::getLocale, locale)) > 0) {
+            throw new BusinessException("该事件、渠道和语言已经存在通知模板");
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -75,6 +85,7 @@ public class NotificationTemplateService {
         template.setDescription(description);
         template.setEventType(eventType);
         template.setChannel(channel);
+        template.setLocale(locale);
         template.setEnabled(false);
         template.setCreatedBy(actorId);
         template.setCreatedAt(now);
@@ -82,7 +93,7 @@ public class NotificationTemplateService {
         try {
             templateMapper.insert(template);
         } catch (DataIntegrityViolationException duplicate) {
-            throw new BusinessException("该事件和渠道已经存在通知模板");
+            throw new BusinessException("该事件、渠道和语言已经存在通知模板");
         }
         NotificationTemplateVersion version = buildVersion(template, 1, command.titleTemplate(),
                 command.contentTemplate(), command.changeNote(), actorId, now);
@@ -133,6 +144,63 @@ public class NotificationTemplateService {
     }
 
     @Transactional
+    public VersionView submit(Long versionId, Long tenantId, Long actorId) {
+        NotificationTemplateVersion version = versionMapper.selectForUpdate(versionId, tenantId);
+        if (version == null) throw new BusinessException("通知模板版本不存在");
+        if (version.getStatus() != NotificationTemplateStatus.DRAFT) {
+            throw new BusinessException("只有草稿版本可以提交审核");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        version.setStatus(NotificationTemplateStatus.PENDING_APPROVAL);
+        version.setSubmittedBy(actorId);
+        version.setSubmittedAt(now);
+        version.setReviewedBy(null);
+        version.setReviewedAt(null);
+        version.setReviewComment(null);
+        version.setUpdatedAt(now);
+        versionMapper.updateById(version);
+        auditLogService.record(tenantId, actorId, "NOTIFICATION_TEMPLATE", version.getTemplateId(),
+                "NOTIFICATION_TEMPLATE_SUBMITTED", Map.of("versionId", versionId),
+                Map.of("versionId", versionId, "status", version.getStatus()),
+                "提交通知模板 v" + version.getVersionNo() + " 审核");
+        return toVersionView(version);
+    }
+
+    @Transactional
+    public VersionView review(Long versionId, ReviewCommand command, Long tenantId, Long actorId) {
+        if (command == null || command.decision() == null) throw new BusinessException("审核决定不能为空");
+        NotificationTemplateVersion version = versionMapper.selectForUpdate(versionId, tenantId);
+        if (version == null) throw new BusinessException("通知模板版本不存在");
+        if (version.getStatus() != NotificationTemplateStatus.PENDING_APPROVAL) {
+            throw new BusinessException("只有待审核版本可以执行审核");
+        }
+        if (actorId != null && actorId.equals(version.getCreatedBy())) {
+            throw new BusinessException("模板创建人与审核人必须分离");
+        }
+        String comment = optionalText(command.comment(), "审核意见", 500);
+        if (command.decision() == ReviewDecision.REJECT && (comment == null || comment.length() < 5)) {
+            throw new BusinessException("驳回时请填写至少 5 个字符的审核意见");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        version.setStatus(command.decision() == ReviewDecision.APPROVE
+                ? NotificationTemplateStatus.APPROVED : NotificationTemplateStatus.REJECTED);
+        version.setReviewedBy(actorId);
+        version.setReviewedAt(now);
+        version.setReviewComment(comment);
+        version.setUpdatedAt(now);
+        versionMapper.updateById(version);
+        String action = command.decision() == ReviewDecision.APPROVE
+                ? "NOTIFICATION_TEMPLATE_APPROVED" : "NOTIFICATION_TEMPLATE_REJECTED";
+        auditLogService.record(tenantId, actorId, "NOTIFICATION_TEMPLATE", version.getTemplateId(), action,
+                Map.of("versionId", versionId, "status", NotificationTemplateStatus.PENDING_APPROVAL),
+                Map.of("versionId", versionId, "status", version.getStatus()),
+                command.decision() == ReviewDecision.APPROVE
+                        ? "批准通知模板 v" + version.getVersionNo()
+                        : "驳回通知模板 v" + version.getVersionNo() + "：" + comment);
+        return toVersionView(version);
+    }
+
+    @Transactional
     public TemplateDetailView publish(Long versionId, Long tenantId, Long actorId) {
         NotificationTemplateVersion version = versionMapper.selectForUpdate(versionId, tenantId);
         if (version == null) throw new BusinessException("通知模板版本不存在");
@@ -141,6 +209,9 @@ public class NotificationTemplateService {
         if (version.getStatus() == NotificationTemplateStatus.PUBLISHED
                 && versionId.equals(template.getActiveVersionId()) && Boolean.TRUE.equals(template.getEnabled())) {
             return detail(template.getId(), tenantId);
+        }
+        if (version.getStatus() != NotificationTemplateStatus.APPROVED) {
+            throw new BusinessException("通知模板版本通过审核后才能发布");
         }
         Long previousVersionId = template.getActiveVersionId();
         if (previousVersionId != null && !previousVersionId.equals(versionId)) {
@@ -204,20 +275,24 @@ public class NotificationTemplateService {
                 renderText(version.getContentTemplate(), sample), version.getId(), version.getVersionNo());
     }
 
-    public RenderedTemplate render(Long tenantId, NotificationChannel channel, Notification notification) {
+    public RenderedTemplate render(Long tenantId, NotificationChannel channel, Notification notification,
+                                   String preferredLocale) {
         if (!TEMPLATE_CHANNELS.contains(channel) || notification == null) {
             return fallback(notification);
         }
         String eventType = normalizeEventType(notification.getType(), false);
+        String locale = normalizeLocale(preferredLocale, true);
+        List<String> locales = DEFAULT_LOCALE.equals(locale) ? List.of(DEFAULT_LOCALE) : List.of(locale, DEFAULT_LOCALE);
         List<NotificationTemplate> candidates = templateMapper.selectList(new LambdaQueryWrapper<NotificationTemplate>()
                 .eq(NotificationTemplate::getTenantId, tenantId)
                 .eq(NotificationTemplate::getChannel, channel)
                 .eq(NotificationTemplate::getEnabled, true)
-                .in(NotificationTemplate::getEventType, List.of(eventType, "*")));
-        NotificationTemplate template = candidates.stream()
-                .filter(item -> eventType.equals(item.getEventType()))
-                .findFirst()
-                .orElseGet(() -> candidates.stream().filter(item -> "*".equals(item.getEventType())).findFirst().orElse(null));
+                .in(NotificationTemplate::getEventType, List.of(eventType, "*"))
+                .in(NotificationTemplate::getLocale, locales));
+        NotificationTemplate template = findCandidate(candidates, eventType, locale);
+        if (template == null && !DEFAULT_LOCALE.equals(locale)) {
+            template = findCandidate(candidates, eventType, DEFAULT_LOCALE);
+        }
         if (template == null || template.getActiveVersionId() == null) return fallback(notification);
         NotificationTemplateVersion version = versionMapper.selectOne(new LambdaQueryWrapper<NotificationTemplateVersion>()
                 .eq(NotificationTemplateVersion::getId, template.getActiveVersionId())
@@ -226,7 +301,25 @@ public class NotificationTemplateService {
                 .eq(NotificationTemplateVersion::getStatus, NotificationTemplateStatus.PUBLISHED));
         if (version == null) return fallback(notification);
         return new RenderedTemplate(version.getId(), renderText(version.getTitleTemplate(), notification),
-                renderText(version.getContentTemplate(), notification));
+                renderText(version.getContentTemplate(), notification), template.getLocale());
+    }
+
+    public RenderedTemplate render(Long tenantId, NotificationChannel channel, Notification notification) {
+        return render(tenantId, channel, notification, DEFAULT_LOCALE);
+    }
+
+    private NotificationTemplate findCandidate(List<NotificationTemplate> candidates, String eventType, String locale) {
+        NotificationTemplate exact = candidates.stream()
+                .filter(item -> eventType.equals(item.getEventType()) && locale.equals(templateLocale(item)))
+                .findFirst().orElse(null);
+        if (exact != null) return exact;
+        return candidates.stream()
+                .filter(item -> "*".equals(item.getEventType()) && locale.equals(templateLocale(item)))
+                .findFirst().orElse(null);
+    }
+
+    private String templateLocale(NotificationTemplate template) {
+        return template.getLocale() == null ? DEFAULT_LOCALE : template.getLocale();
     }
 
     private NotificationTemplateVersion buildVersion(NotificationTemplate template, int versionNo, String title,
@@ -286,7 +379,7 @@ public class NotificationTemplateService {
 
     private RenderedTemplate fallback(Notification notification) {
         return new RenderedTemplate(null, notification == null ? "" : value(notification.getTitle()),
-                notification == null ? "" : value(notification.getContent()));
+                notification == null ? "" : value(notification.getContent()), DEFAULT_LOCALE);
     }
 
     private TemplateView toView(NotificationTemplate template) {
@@ -296,7 +389,7 @@ public class NotificationTemplateService {
                 .eq(NotificationTemplateVersion::getTenantId, template.getTenantId())
                 .eq(NotificationTemplateVersion::getTemplateId, template.getId()));
         return new TemplateView(template.getId(), template.getName(), template.getDescription(), template.getEventType(),
-                template.getChannel(), Boolean.TRUE.equals(template.getEnabled()), template.getActiveVersionId(),
+                template.getChannel(), templateLocale(template), Boolean.TRUE.equals(template.getEnabled()), template.getActiveVersionId(),
                 active == null ? null : active.getVersionNo(), versions, template.getCreatedBy(), template.getCreatedAt(),
                 template.getUpdatedAt());
     }
@@ -304,6 +397,8 @@ public class NotificationTemplateService {
     private VersionView toVersionView(NotificationTemplateVersion version) {
         return new VersionView(version.getId(), version.getTemplateId(), version.getVersionNo(), version.getStatus(),
                 version.getTitleTemplate(), version.getContentTemplate(), version.getChangeNote(), version.getCreatedBy(),
+                version.getSubmittedBy(), version.getSubmittedAt(), version.getReviewedBy(), version.getReviewedAt(),
+                version.getReviewComment(),
                 version.getPublishedBy(), version.getPublishedAt(), version.getCreatedAt(), version.getUpdatedAt());
     }
 
@@ -319,6 +414,16 @@ public class NotificationTemplateService {
             throw new BusinessException("模板渠道仅支持 EMAIL、WEBHOOK 或 WECOM");
         }
         return channel;
+    }
+
+    private String normalizeLocale(String value, boolean useDefault) {
+        String result = trim(value);
+        if (result == null) return useDefault ? DEFAULT_LOCALE : null;
+        String normalized = result.replace('_', '-');
+        if (normalized.equalsIgnoreCase("zh") || normalized.equalsIgnoreCase("zh-cn")) return DEFAULT_LOCALE;
+        if (normalized.equalsIgnoreCase("en") || normalized.equalsIgnoreCase("en-us")) return "en-US";
+        if (!SUPPORTED_LOCALES.contains(normalized)) throw new BusinessException("模板语言仅支持 zh-CN 或 en-US");
+        return normalized;
     }
 
     private String normalizeEventType(String value, boolean allowWildcard) {
@@ -362,17 +467,30 @@ public class NotificationTemplateService {
     }
 
     public record CreateCommand(String name, String description, String eventType, NotificationChannel channel,
-                                String titleTemplate, String contentTemplate, String changeNote) { }
+                                String locale, String titleTemplate, String contentTemplate, String changeNote) {
+        public CreateCommand(String name, String description, String eventType, NotificationChannel channel,
+                             String titleTemplate, String contentTemplate, String changeNote) {
+            this(name, description, eventType, channel, DEFAULT_LOCALE, titleTemplate, contentTemplate, changeNote);
+        }
+    }
     public record MetadataCommand(String name, String description) { }
     public record VersionCommand(String titleTemplate, String contentTemplate, String changeNote) { }
     public record TemplateView(Long id, String name, String description, String eventType, NotificationChannel channel,
-                               boolean enabled, Long activeVersionId, Integer activeVersionNo, long versionCount,
+                               String locale, boolean enabled, Long activeVersionId, Integer activeVersionNo, long versionCount,
                                Long createdBy, LocalDateTime createdAt, LocalDateTime updatedAt) { }
     public record VersionView(Long id, Long templateId, Integer versionNo, NotificationTemplateStatus status,
                               String titleTemplate, String contentTemplate, String changeNote, Long createdBy,
+                              Long submittedBy, LocalDateTime submittedAt, Long reviewedBy, LocalDateTime reviewedAt,
+                              String reviewComment,
                               Long publishedBy, LocalDateTime publishedAt, LocalDateTime createdAt,
                               LocalDateTime updatedAt) { }
     public record TemplateDetailView(TemplateView template, List<VersionView> versions) { }
     public record PreviewView(String title, String content, Long versionId, Integer versionNo) { }
-    public record RenderedTemplate(Long versionId, String title, String content) { }
+    public record RenderedTemplate(Long versionId, String title, String content, String locale) {
+        public RenderedTemplate(Long versionId, String title, String content) {
+            this(versionId, title, content, DEFAULT_LOCALE);
+        }
+    }
+    public enum ReviewDecision { APPROVE, REJECT }
+    public record ReviewCommand(ReviewDecision decision, String comment) { }
 }

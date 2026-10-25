@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.time.LocalTime;
 
 @RestController
 @RequestMapping("/api/v1/notification-preferences")
@@ -42,10 +43,17 @@ public class NotificationPreferenceController {
                                     @Size(max = 200) String webhookSecret,
                                     @Size(max = 1000) String wecomWebhookUrl,
                                     Boolean clearWecomWebhook,
+                                    @Size(max = 16) String preferredLocale,
+                                    @Size(max = 64) String timeZone,
+                                    Boolean deliveryWindowEnabled,
+                                    LocalTime deliveryWindowStart,
+                                    LocalTime deliveryWindowEnd,
+                                    Boolean urgentBypass,
                                     @Size(max = 50) List<RuleRequest> rules) {
         NotificationPreferenceService.PreferenceCommand command() {
             return new NotificationPreferenceService.PreferenceCommand(emailAddress, webhookUrl, webhookSecret,
-                    wecomWebhookUrl, clearWecomWebhook,
+                    wecomWebhookUrl, clearWecomWebhook, preferredLocale, timeZone, deliveryWindowEnabled,
+                    deliveryWindowStart, deliveryWindowEnd, urgentBypass,
                     rules == null ? List.of() : rules.stream().map(RuleRequest::command).toList());
         }
     }

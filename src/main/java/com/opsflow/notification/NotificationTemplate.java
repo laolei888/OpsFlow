@@ -17,6 +17,7 @@ public class NotificationTemplate {
     private String description;
     private String eventType;
     private NotificationChannel channel;
+    private String locale;
     private Boolean enabled;
     private Long activeVersionId;
     private Long createdBy;

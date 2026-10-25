@@ -95,10 +95,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV51() throws SQLException {
+    void appliesEveryMigrationThroughV52() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("51", flyway.info().current().getVersion().getVersion());
-        assertEquals(51, flyway.info().applied().length);
+        assertEquals("52", flyway.info().current().getVersion().getVersion());
+        assertEquals(52, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
@@ -142,6 +142,24 @@ class DatabaseMigrationIT {
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertEquals(2, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND (
+                         (table_name = 'notification_templates' AND column_name = 'locale') OR
+                         (table_name = 'notification_template_versions' AND column_name IN
+                            ('submitted_by', 'submitted_at', 'reviewed_by', 'reviewed_at', 'review_comment')) OR
+                         (table_name = 'notification_channel_profiles' AND column_name IN
+                            ('preferred_locale', 'time_zone', 'delivery_window_enabled',
+                             'delivery_window_start', 'delivery_window_end', 'urgent_bypass')) OR
+                         (table_name = 'notification_deliveries' AND column_name IN
+                            ('delivery_locale', 'scheduled_reason'))
+                     )
+                     """)) {
+            ResultSet result = statement.executeQuery();
+            result.next();
+            assertEquals(14, result.getInt(1));
         }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""

@@ -12,7 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.URI;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,23 +62,30 @@ public class NotificationDeliveryService {
 
     @Transactional
     public void plan(Notification notification, NotificationPreferenceService.ResolvedPreference preference) {
-        LocalDateTime now = LocalDateTime.now();
+        Instant current = Instant.now();
+        LocalDateTime now = LocalDateTime.ofInstant(current, ZoneId.systemDefault());
+        NotificationPreferenceService.DeliveryWindowDecision window = preferenceService.deliveryWindow(
+                preference, notification.getType(), current);
         boolean inAppCreated = create(notification, NotificationChannel.IN_APP, null, null,
                 preference.inAppEnabled() ? NotificationDeliveryStatus.DELIVERED : NotificationDeliveryStatus.SKIPPED,
-                preference.inAppEnabled() ? null : "用户已关闭该事件的站内通知", now);
+                preference.inAppEnabled() ? null : "用户已关闭该事件的站内通知", now, null,
+                preference.preferredLocale());
         if (inAppCreated && preference.inAppEnabled()) metrics.succeeded(NotificationChannel.IN_APP);
         if (preference.emailEnabled()) {
             create(notification, NotificationChannel.EMAIL, preference.emailAddress(), null,
-                    destinationStatus(preference.emailAddress()), missingDestination(preference.emailAddress(), "邮件地址"), now);
+                    destinationStatus(preference.emailAddress()), missingDestination(preference.emailAddress(), "邮件地址"),
+                    window.nextAttemptAt(), window.reason(), preference.preferredLocale());
         }
         if (preference.webhookEnabled()) {
             create(notification, NotificationChannel.WEBHOOK, preference.webhookUrl(), preference.webhookSecret(),
-                    destinationStatus(preference.webhookUrl()), missingDestination(preference.webhookUrl(), "Webhook 地址"), now);
+                    destinationStatus(preference.webhookUrl()), missingDestination(preference.webhookUrl(), "Webhook 地址"),
+                    window.nextAttemptAt(), window.reason(), preference.preferredLocale());
         }
         if (preference.wecomEnabled()) {
             create(notification, NotificationChannel.WECOM, preference.wecomWebhookUrl(), null,
                     destinationStatus(preference.wecomWebhookUrl()),
-                    missingDestination(preference.wecomWebhookUrl(), "企业微信机器人地址"), now);
+                    missingDestination(preference.wecomWebhookUrl(), "企业微信机器人地址"),
+                    window.nextAttemptAt(), window.reason(), preference.preferredLocale());
         }
     }
 
@@ -189,11 +198,16 @@ public class NotificationDeliveryService {
             throw new BusinessException("通知正在投递中，请稍后再试");
         }
         NotificationDeliveryStatus before = delivery.getStatus();
-        refreshDestination(delivery);
-        LocalDateTime now = LocalDateTime.now();
+        NotificationPreferenceService.ResolvedPreference currentPreference = refreshDestination(delivery);
+        Instant current = Instant.now();
+        LocalDateTime now = LocalDateTime.ofInstant(current, ZoneId.systemDefault());
+        NotificationPreferenceService.DeliveryWindowDecision window = preferenceService.deliveryWindow(
+                currentPreference, delivery.getNotificationType(), current);
         delivery.setStatus(NotificationDeliveryStatus.PENDING);
         delivery.setAttemptCount(0);
-        delivery.setNextAttemptAt(now);
+        delivery.setNextAttemptAt(window.nextAttemptAt());
+        delivery.setScheduledReason(window.reason());
+        delivery.setDeliveryLocale(currentPreference.preferredLocale());
         delivery.setResponseStatus(null);
         delivery.setLastError(null);
         delivery.setDeliveredAt(null);
@@ -206,7 +220,7 @@ public class NotificationDeliveryService {
         return toView(delivery, notification);
     }
 
-    private void refreshDestination(NotificationDelivery delivery) {
+    private NotificationPreferenceService.ResolvedPreference refreshDestination(NotificationDelivery delivery) {
         NotificationPreferenceService.ResolvedPreference current = preferenceService.resolve(
                 delivery.getTenantId(), delivery.getRecipientId(), delivery.getNotificationType());
         if (delivery.getChannel() == NotificationChannel.EMAIL) {
@@ -215,7 +229,7 @@ public class NotificationDeliveryService {
             }
             delivery.setDestination(current.emailAddress());
             delivery.setDeliverySecret(null);
-            return;
+            return current;
         }
         if (delivery.getChannel() == NotificationChannel.WEBHOOK) {
             if (!current.webhookEnabled() || trim(current.webhookUrl()) == null
@@ -224,7 +238,7 @@ public class NotificationDeliveryService {
             }
             delivery.setDestination(current.webhookUrl());
             delivery.setDeliverySecret(current.webhookSecret());
-            return;
+            return current;
         }
         if (delivery.getChannel() == NotificationChannel.WECOM) {
             if (!current.wecomEnabled() || trim(current.wecomWebhookUrl()) == null) {
@@ -232,7 +246,9 @@ public class NotificationDeliveryService {
             }
             delivery.setDestination(current.wecomWebhookUrl());
             delivery.setDeliverySecret(null);
+            return current;
         }
+        return current;
     }
 
     private DeliveryAttempt claim(Long id, Long tenantId) {
@@ -304,7 +320,9 @@ public class NotificationDeliveryService {
     }
 
     private boolean create(Notification notification, NotificationChannel channel, String destination,
-                           String secret, NotificationDeliveryStatus status, String error, LocalDateTime now) {
+                           String secret, NotificationDeliveryStatus status, String error,
+                           LocalDateTime nextAttemptAt, String scheduledReason, String preferredLocale) {
+        LocalDateTime now = LocalDateTime.now();
         NotificationDelivery delivery = new NotificationDelivery();
         delivery.setTenantId(notification.getTenantId());
         delivery.setNotificationId(notification.getId());
@@ -314,13 +332,16 @@ public class NotificationDeliveryService {
         delivery.setDestination(destination);
         delivery.setDeliverySecret(secret);
         NotificationTemplateService.RenderedTemplate rendered = templateService.render(
-                notification.getTenantId(), channel, notification);
+                notification.getTenantId(), channel, notification, preferredLocale);
         delivery.setTemplateVersionId(rendered.versionId());
         delivery.setRenderedTitle(rendered.title());
         delivery.setRenderedContent(rendered.content());
+        delivery.setDeliveryLocale(preferredLocale == null
+                ? NotificationTemplateService.DEFAULT_LOCALE : preferredLocale);
+        delivery.setScheduledReason(status == NotificationDeliveryStatus.PENDING ? scheduledReason : null);
         delivery.setStatus(status);
         delivery.setAttemptCount(0);
-        delivery.setNextAttemptAt(now);
+        delivery.setNextAttemptAt(nextAttemptAt == null ? now : nextAttemptAt);
         delivery.setLastError(error);
         delivery.setDeliveredAt(status == NotificationDeliveryStatus.DELIVERED ? now : null);
         delivery.setCreatedAt(now);
@@ -357,7 +378,8 @@ public class NotificationDeliveryService {
                 delivery.getChannel(), destinationPreview(delivery.getChannel(), delivery.getDestination()),
                 delivery.getStatus(), delivery.getAttemptCount(), delivery.getNextAttemptAt(),
                 delivery.getResponseStatus(), delivery.getLastError(), delivery.getDeliveredAt(),
-                delivery.getTemplateVersionId(), delivery.getCreatedAt(), delivery.getUpdatedAt());
+                delivery.getTemplateVersionId(), delivery.getDeliveryLocale(), delivery.getScheduledReason(),
+                delivery.getCreatedAt(), delivery.getUpdatedAt());
     }
 
     private String destinationPreview(NotificationChannel channel, String value) {
@@ -412,7 +434,8 @@ public class NotificationDeliveryService {
                                String title, NotificationChannel channel, String destinationPreview,
                                NotificationDeliveryStatus status, Integer attemptCount, LocalDateTime nextAttemptAt,
                                Integer responseStatus, String lastError, LocalDateTime deliveredAt,
-                               Long templateVersionId, LocalDateTime createdAt, LocalDateTime updatedAt) { }
+                               Long templateVersionId, String deliveryLocale, String scheduledReason,
+                               LocalDateTime createdAt, LocalDateTime updatedAt) { }
 
     public record DeliverySummary(long pending, long processing, long retrying, long delivered,
                                   long dead, long skipped, LocalDateTime oldestPendingAt) { }

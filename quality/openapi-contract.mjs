@@ -56,7 +56,14 @@ const requiredOperations = [
   ['post', '/api/v1/admin/disaster-recovery/drills/{id}/start'],
   ['put', '/api/v1/admin/disaster-recovery/drills/{drillId}/checks/{checkId}'],
   ['post', '/api/v1/admin/disaster-recovery/drills/{id}/complete'],
-  ['post', '/api/v1/admin/disaster-recovery/drills/{id}/cancel']
+  ['post', '/api/v1/admin/disaster-recovery/drills/{id}/cancel'],
+  ['get', '/api/v1/admin/notification-templates'],
+  ['post', '/api/v1/admin/notification-templates'],
+  ['post', '/api/v1/admin/notification-templates/versions/{versionId}/submit'],
+  ['post', '/api/v1/admin/notification-templates/versions/{versionId}/review'],
+  ['post', '/api/v1/admin/notification-templates/versions/{versionId}/publish'],
+  ['get', '/api/v1/notification-preferences'],
+  ['put', '/api/v1/notification-preferences']
 ]
 
 const publicOperations = [

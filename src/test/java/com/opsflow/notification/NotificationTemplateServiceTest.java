@@ -30,6 +30,7 @@ class NotificationTemplateServiceTest {
         template.setTenantId(1L);
         template.setEventType("INCIDENT_DECLARED");
         template.setChannel(NotificationChannel.WECOM);
+        template.setLocale("zh-CN");
         template.setEnabled(true);
         template.setActiveVersionId(21L);
         NotificationTemplateVersion version = new NotificationTemplateVersion();
@@ -73,6 +74,77 @@ class NotificationTemplateServiceTest {
         assertThatThrownBy(() -> templateService.create(command, 1L, 9L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("未知变量");
+    }
+
+    @Test
+    void prefersRecipientLocaleAndFallsBackToDefaultLocale() {
+        NotificationTemplate english = new NotificationTemplate();
+        english.setId(12L);
+        english.setTenantId(1L);
+        english.setEventType("INCIDENT_DECLARED");
+        english.setChannel(NotificationChannel.EMAIL);
+        english.setLocale("en-US");
+        english.setEnabled(true);
+        english.setActiveVersionId(22L);
+        NotificationTemplateVersion version = new NotificationTemplateVersion();
+        version.setId(22L);
+        version.setTenantId(1L);
+        version.setTemplateId(12L);
+        version.setVersionNo(1);
+        version.setStatus(NotificationTemplateStatus.PUBLISHED);
+        version.setTitleTemplate("Incident: {{title}}");
+        version.setContentTemplate("{{content}}");
+        when(templateMapper.selectList(any())).thenReturn(List.of(english));
+        when(versionMapper.selectOne(any())).thenReturn(version);
+
+        NotificationTemplateService.RenderedTemplate rendered = templateService.render(
+                1L, NotificationChannel.EMAIL, notification(), "en-US");
+
+        assertThat(rendered.locale()).isEqualTo("en-US");
+        assertThat(rendered.title()).startsWith("Incident:");
+    }
+
+    @Test
+    void enforcesMakerCheckerBeforeApproval() {
+        NotificationTemplateVersion version = new NotificationTemplateVersion();
+        version.setId(31L);
+        version.setTemplateId(11L);
+        version.setVersionNo(2);
+        version.setStatus(NotificationTemplateStatus.DRAFT);
+        version.setCreatedBy(7L);
+        when(versionMapper.selectForUpdate(31L, 1L)).thenReturn(version);
+
+        NotificationTemplateService.VersionView submitted = templateService.submit(31L, 1L, 7L);
+        assertThat(submitted.status()).isEqualTo(NotificationTemplateStatus.PENDING_APPROVAL);
+
+        assertThatThrownBy(() -> templateService.review(31L,
+                new NotificationTemplateService.ReviewCommand(
+                        NotificationTemplateService.ReviewDecision.APPROVE, "内容符合规范"), 1L, 7L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("必须分离");
+
+        NotificationTemplateService.VersionView approved = templateService.review(31L,
+                new NotificationTemplateService.ReviewCommand(
+                        NotificationTemplateService.ReviewDecision.APPROVE, "内容符合规范"), 1L, 8L);
+        assertThat(approved.status()).isEqualTo(NotificationTemplateStatus.APPROVED);
+        assertThat(approved.reviewedBy()).isEqualTo(8L);
+    }
+
+    @Test
+    void refusesToPublishVersionThatHasNotBeenApproved() {
+        NotificationTemplateVersion version = new NotificationTemplateVersion();
+        version.setId(41L);
+        version.setTemplateId(12L);
+        version.setStatus(NotificationTemplateStatus.DRAFT);
+        NotificationTemplate template = new NotificationTemplate();
+        template.setId(12L);
+        template.setTenantId(1L);
+        when(versionMapper.selectForUpdate(41L, 1L)).thenReturn(version);
+        when(templateMapper.selectForUpdate(12L, 1L)).thenReturn(template);
+
+        assertThatThrownBy(() -> templateService.publish(41L, 1L, 9L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("通过审核后才能发布");
     }
 
     private Notification notification() {

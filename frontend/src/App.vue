@@ -349,7 +349,12 @@ Object.assign(auditLabels, {
   RECOVERY_DRILL_STARTED: '开始恢复演练', RECOVERY_DRILL_CHECK_UPDATED: '记录演练检查证据',
   RECOVERY_DRILL_PASSED: '恢复演练通过', RECOVERY_DRILL_FAILED: '恢复演练失败',
   RECOVERY_DRILL_CANCELLED: '取消恢复演练',
-  NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递'
+  NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递',
+  NOTIFICATION_TEMPLATE_CREATED: '创建通知模板', NOTIFICATION_TEMPLATE_UPDATED: '更新通知模板',
+  NOTIFICATION_TEMPLATE_VERSION_CREATED: '创建模板版本', NOTIFICATION_TEMPLATE_SUBMITTED: '提交模板审核',
+  NOTIFICATION_TEMPLATE_APPROVED: '批准模板版本', NOTIFICATION_TEMPLATE_REJECTED: '驳回模板版本',
+  NOTIFICATION_TEMPLATE_PUBLISHED: '发布模板版本', NOTIFICATION_TEMPLATE_ENABLED: '启用通知模板',
+  NOTIFICATION_TEMPLATE_DISABLED: '停用通知模板'
 })
 const auditActionOptions = [
   { value: 'CREATED', label: '创建工单' },
@@ -466,7 +471,13 @@ const auditActionOptions = [
   { value: 'RECOVERY_DRILL_FAILED', label: '恢复演练失败' },
   { value: 'RECOVERY_DRILL_CANCELLED', label: '取消恢复演练' },
   { value: 'NOTIFICATION_PREFERENCES_UPDATED', label: '更新通知偏好' },
-  { value: 'NOTIFICATION_DELIVERY_RETRY', label: '重试通知投递' }
+  { value: 'NOTIFICATION_DELIVERY_RETRY', label: '重试通知投递' },
+  { value: 'NOTIFICATION_TEMPLATE_CREATED', label: '创建通知模板' },
+  { value: 'NOTIFICATION_TEMPLATE_VERSION_CREATED', label: '创建模板版本' },
+  { value: 'NOTIFICATION_TEMPLATE_SUBMITTED', label: '提交模板审核' },
+  { value: 'NOTIFICATION_TEMPLATE_APPROVED', label: '批准模板版本' },
+  { value: 'NOTIFICATION_TEMPLATE_REJECTED', label: '驳回模板版本' },
+  { value: 'NOTIFICATION_TEMPLATE_PUBLISHED', label: '发布模板版本' }
 ]
 const nextStatus = { OPEN: 'IN_PROGRESS', IN_PROGRESS: 'WAITING_CONFIRMATION', WAITING_CONFIRMATION: 'RESOLVED', RESOLVED: 'CLOSED' }
 function canAdvanceTicket(ticket) {

@@ -22,6 +22,8 @@ public class NotificationDelivery {
     private Long templateVersionId;
     private String renderedTitle;
     private String renderedContent;
+    private String deliveryLocale;
+    private String scheduledReason;
     private NotificationDeliveryStatus status;
     private Integer attemptCount;
     private LocalDateTime nextAttemptAt;

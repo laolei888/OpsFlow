@@ -8,7 +8,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -16,10 +21,17 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class NotificationPreferenceService {
+    private static final String DEFAULT_TIME_ZONE = "Asia/Shanghai";
+    private static final LocalTime DEFAULT_WINDOW_START = LocalTime.of(8, 0);
+    private static final LocalTime DEFAULT_WINDOW_END = LocalTime.of(22, 0);
+    private static final Set<String> URGENT_EVENT_TYPES = Set.of(
+            "INCIDENT_DECLARED", "INCIDENT_STATUS_CHANGED", "ONCALL_ESCALATION",
+            "MONITORING_ALERT", "SLA_OVERDUE");
     private final NotificationChannelProfileMapper profileMapper;
     private final NotificationEventPreferenceMapper preferenceMapper;
     private final OutboundUrlPolicy outboundUrlPolicy;
@@ -48,6 +60,17 @@ public class NotificationPreferenceService {
         String emailAddress = normalizeEmail(command.emailAddress());
         String webhookUrl = normalizeWebhookUrl(command.webhookUrl());
         NotificationChannelProfile profile = findProfile(tenantId, userId);
+        String preferredLocale = normalizeLocale(command.preferredLocale());
+        String timeZone = normalizeTimeZone(command.timeZone());
+        boolean deliveryWindowEnabled = Boolean.TRUE.equals(command.deliveryWindowEnabled());
+        LocalTime deliveryWindowStart = command.deliveryWindowStart() == null
+                ? DEFAULT_WINDOW_START : command.deliveryWindowStart();
+        LocalTime deliveryWindowEnd = command.deliveryWindowEnd() == null
+                ? DEFAULT_WINDOW_END : command.deliveryWindowEnd();
+        if (deliveryWindowEnabled && deliveryWindowStart.equals(deliveryWindowEnd)) {
+            throw new BusinessException("通知发送时间窗的开始和结束时间不能相同");
+        }
+        boolean urgentBypass = command.urgentBypass() == null || command.urgentBypass();
         String requestedWecomUrl = trim(command.wecomWebhookUrl());
         String wecomWebhookUrl = Boolean.TRUE.equals(command.clearWecomWebhook()) ? null
                 : requestedWecomUrl == null ? (profile == null ? null : profile.getWecomWebhookUrl())
@@ -84,6 +107,12 @@ public class NotificationPreferenceService {
         profile.setWebhookUrl(webhookUrl);
         profile.setWebhookSecret(secret);
         profile.setWecomWebhookUrl(wecomWebhookUrl);
+        profile.setPreferredLocale(preferredLocale);
+        profile.setTimeZone(timeZone);
+        profile.setDeliveryWindowEnabled(deliveryWindowEnabled);
+        profile.setDeliveryWindowStart(deliveryWindowStart);
+        profile.setDeliveryWindowEnd(deliveryWindowEnd);
+        profile.setUrgentBypass(urgentBypass);
         profile.setUpdatedAt(now);
         if (profile.getId() == null) profileMapper.insert(profile); else profileMapper.updateById(profile);
 
@@ -130,7 +159,48 @@ public class NotificationPreferenceService {
                 profile == null ? null : profile.getEmailAddress(),
                 profile == null ? null : profile.getWebhookUrl(),
                 profile == null ? null : profile.getWebhookSecret(),
-                profile == null ? null : profile.getWecomWebhookUrl());
+                profile == null ? null : profile.getWecomWebhookUrl(),
+                profile == null ? NotificationTemplateService.DEFAULT_LOCALE : normalizeStoredLocale(profile.getPreferredLocale()),
+                profile == null ? DEFAULT_TIME_ZONE : normalizeStoredTimeZone(profile.getTimeZone()),
+                profile != null && Boolean.TRUE.equals(profile.getDeliveryWindowEnabled()),
+                profile == null || profile.getDeliveryWindowStart() == null ? DEFAULT_WINDOW_START : profile.getDeliveryWindowStart(),
+                profile == null || profile.getDeliveryWindowEnd() == null ? DEFAULT_WINDOW_END : profile.getDeliveryWindowEnd(),
+                profile == null || !Boolean.FALSE.equals(profile.getUrgentBypass()));
+    }
+
+    public DeliveryWindowDecision deliveryWindow(ResolvedPreference preference, String eventType, Instant now) {
+        Instant current = now == null ? Instant.now() : now;
+        ZoneId systemZone = ZoneId.systemDefault();
+        LocalDateTime immediate = LocalDateTime.ofInstant(current, systemZone);
+        if (preference == null || !preference.deliveryWindowEnabled()) {
+            return new DeliveryWindowDecision(immediate, false, null);
+        }
+        String normalizedEvent = normalizeEventType(eventType, false);
+        if (preference.urgentBypass() && URGENT_EVENT_TYPES.contains(normalizedEvent)) {
+            return new DeliveryWindowDecision(immediate, false, "紧急事件已越过发送时间窗");
+        }
+        ZoneId recipientZone = ZoneId.of(normalizeStoredTimeZone(preference.timeZone()));
+        LocalTime start = preference.deliveryWindowStart() == null ? DEFAULT_WINDOW_START : preference.deliveryWindowStart();
+        LocalTime end = preference.deliveryWindowEnd() == null ? DEFAULT_WINDOW_END : preference.deliveryWindowEnd();
+        ZonedDateTime recipientNow = current.atZone(recipientZone);
+        LocalTime currentTime = recipientNow.toLocalTime();
+        boolean overnight = start.isAfter(end);
+        boolean allowed = overnight
+                ? !currentTime.isBefore(start) || currentTime.isBefore(end)
+                : !currentTime.isBefore(start) && currentTime.isBefore(end);
+        if (allowed) return new DeliveryWindowDecision(immediate, false, null);
+
+        LocalDate targetDate;
+        if (overnight) {
+            targetDate = recipientNow.toLocalDate();
+        } else {
+            targetDate = currentTime.isBefore(start)
+                    ? recipientNow.toLocalDate() : recipientNow.toLocalDate().plusDays(1);
+        }
+        ZonedDateTime target = ZonedDateTime.of(targetDate, start, recipientZone);
+        LocalDateTime scheduledAt = LocalDateTime.ofInstant(target.toInstant(), systemZone);
+        String reason = "接收人发送时间窗为 " + start + "–" + end + "（" + recipientZone.getId() + "）";
+        return new DeliveryWindowDecision(scheduledAt, true, reason);
     }
 
     private NotificationChannelProfile findProfile(Long tenantId, Long userId) {
@@ -143,7 +213,13 @@ public class NotificationPreferenceService {
         return new PreferenceView(profile == null ? null : profile.getEmailAddress(),
                 profile == null ? null : profile.getWebhookUrl(),
                 maskSecret(profile == null ? null : profile.getWebhookSecret()),
-                maskWecomUrl(profile == null ? null : profile.getWecomWebhookUrl()), rules);
+                maskWecomUrl(profile == null ? null : profile.getWecomWebhookUrl()),
+                profile == null ? NotificationTemplateService.DEFAULT_LOCALE : normalizeStoredLocale(profile.getPreferredLocale()),
+                profile == null ? DEFAULT_TIME_ZONE : normalizeStoredTimeZone(profile.getTimeZone()),
+                profile != null && Boolean.TRUE.equals(profile.getDeliveryWindowEnabled()),
+                profile == null || profile.getDeliveryWindowStart() == null ? DEFAULT_WINDOW_START : profile.getDeliveryWindowStart(),
+                profile == null || profile.getDeliveryWindowEnd() == null ? DEFAULT_WINDOW_END : profile.getDeliveryWindowEnd(),
+                profile == null || !Boolean.FALSE.equals(profile.getUrgentBypass()), rules);
     }
 
     private RuleView toRuleView(NotificationEventPreference preference) {
@@ -205,6 +281,41 @@ public class NotificationPreferenceService {
             throw new BusinessException("企业微信机器人地址必须使用官方 HTTPS Webhook");
         }
         return result;
+    }
+
+    private String normalizeLocale(String value) {
+        String result = trim(value);
+        if (result == null || result.equalsIgnoreCase("zh") || result.equalsIgnoreCase("zh-cn")
+                || result.equalsIgnoreCase("zh_cn")) return NotificationTemplateService.DEFAULT_LOCALE;
+        if (result.equalsIgnoreCase("en") || result.equalsIgnoreCase("en-us")
+                || result.equalsIgnoreCase("en_us")) return "en-US";
+        throw new BusinessException("通知语言仅支持 zh-CN 或 en-US");
+    }
+
+    private String normalizeStoredLocale(String value) {
+        try {
+            return normalizeLocale(value);
+        } catch (BusinessException ignored) {
+            return NotificationTemplateService.DEFAULT_LOCALE;
+        }
+    }
+
+    private String normalizeTimeZone(String value) {
+        String result = trim(value);
+        if (result == null) return DEFAULT_TIME_ZONE;
+        try {
+            return ZoneId.of(result).getId();
+        } catch (RuntimeException invalid) {
+            throw new BusinessException("通知时区无效，请使用 IANA 时区，例如 Asia/Shanghai");
+        }
+    }
+
+    private String normalizeStoredTimeZone(String value) {
+        try {
+            return normalizeTimeZone(value);
+        } catch (BusinessException ignored) {
+            return DEFAULT_TIME_ZONE;
+        }
     }
 
     private String normalizeEventType(String value, boolean allowWildcard) {
@@ -296,13 +407,24 @@ public class NotificationPreferenceService {
 
     public record PreferenceCommand(String emailAddress, String webhookUrl, String webhookSecret,
                                     String wecomWebhookUrl, Boolean clearWecomWebhook,
-                                    List<RuleCommand> rules) { }
+                                    String preferredLocale, String timeZone, Boolean deliveryWindowEnabled,
+                                    LocalTime deliveryWindowStart, LocalTime deliveryWindowEnd, Boolean urgentBypass,
+                                    List<RuleCommand> rules) {
+        public PreferenceCommand(String emailAddress, String webhookUrl, String webhookSecret,
+                                 String wecomWebhookUrl, Boolean clearWecomWebhook, List<RuleCommand> rules) {
+            this(emailAddress, webhookUrl, webhookSecret, wecomWebhookUrl, clearWecomWebhook,
+                    NotificationTemplateService.DEFAULT_LOCALE, DEFAULT_TIME_ZONE, false,
+                    DEFAULT_WINDOW_START, DEFAULT_WINDOW_END, true, rules);
+        }
+    }
 
     public record RuleCommand(String eventType, boolean inAppEnabled, boolean emailEnabled,
                               boolean webhookEnabled, boolean wecomEnabled) { }
 
     public record PreferenceView(String emailAddress, String webhookUrl, String webhookSecretPreview,
-                                 String wecomWebhookUrlPreview,
+                                 String wecomWebhookUrlPreview, String preferredLocale, String timeZone,
+                                 boolean deliveryWindowEnabled, LocalTime deliveryWindowStart,
+                                 LocalTime deliveryWindowEnd, boolean urgentBypass,
                                  List<RuleView> rules) { }
 
     public record RuleView(String eventType, boolean inAppEnabled, boolean emailEnabled,
@@ -310,5 +432,17 @@ public class NotificationPreferenceService {
 
     public record ResolvedPreference(boolean inAppEnabled, boolean emailEnabled, boolean webhookEnabled,
                                      boolean wecomEnabled, String emailAddress, String webhookUrl,
-                                     String webhookSecret, String wecomWebhookUrl) { }
+                                     String webhookSecret, String wecomWebhookUrl, String preferredLocale,
+                                     String timeZone, boolean deliveryWindowEnabled, LocalTime deliveryWindowStart,
+                                     LocalTime deliveryWindowEnd, boolean urgentBypass) {
+        public ResolvedPreference(boolean inAppEnabled, boolean emailEnabled, boolean webhookEnabled,
+                                  boolean wecomEnabled, String emailAddress, String webhookUrl,
+                                  String webhookSecret, String wecomWebhookUrl) {
+            this(inAppEnabled, emailEnabled, webhookEnabled, wecomEnabled, emailAddress, webhookUrl,
+                    webhookSecret, wecomWebhookUrl, NotificationTemplateService.DEFAULT_LOCALE,
+                    DEFAULT_TIME_ZONE, false, DEFAULT_WINDOW_START, DEFAULT_WINDOW_END, true);
+        }
+    }
+
+    public record DeliveryWindowDecision(LocalDateTime nextAttemptAt, boolean delayed, String reason) { }
 }

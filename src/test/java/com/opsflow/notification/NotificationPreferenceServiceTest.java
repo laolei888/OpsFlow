@@ -10,6 +10,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,6 +36,9 @@ class NotificationPreferenceServiceTest {
 
         assertThat(view.emailAddress()).isNull();
         assertThat(view.webhookSecretPreview()).isNull();
+        assertThat(view.preferredLocale()).isEqualTo("zh-CN");
+        assertThat(view.timeZone()).isEqualTo("Asia/Shanghai");
+        assertThat(view.deliveryWindowEnabled()).isFalse();
         assertThat(view.rules()).containsExactly(
                 new NotificationPreferenceService.RuleView("*", true, false, false, false));
     }
@@ -91,6 +97,36 @@ class NotificationPreferenceServiceTest {
         assertThatThrownBy(() -> preferenceService.update(command, 1L, 7L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("邮件地址格式无效");
+    }
+
+    @Test
+    void delaysNonUrgentExternalDeliveryUntilRecipientsWindow() {
+        NotificationPreferenceService.ResolvedPreference preference =
+                new NotificationPreferenceService.ResolvedPreference(true, true, false, false,
+                        "agent@example.com", null, null, null, "en-US", "Asia/Shanghai",
+                        true, LocalTime.of(9, 0), LocalTime.of(18, 0), true);
+
+        NotificationPreferenceService.DeliveryWindowDecision decision = preferenceService.deliveryWindow(
+                preference, "REPORT_READY", Instant.parse("2026-10-25T23:00:00Z"));
+
+        assertThat(decision.delayed()).isTrue();
+        assertThat(decision.nextAttemptAt().atZone(ZoneId.systemDefault()).toInstant())
+                .isEqualTo(Instant.parse("2026-10-26T01:00:00Z"));
+        assertThat(decision.reason()).contains("Asia/Shanghai");
+    }
+
+    @Test
+    void urgentEventBypassesDeliveryWindow() {
+        NotificationPreferenceService.ResolvedPreference preference =
+                new NotificationPreferenceService.ResolvedPreference(true, true, false, false,
+                        "agent@example.com", null, null, null, "zh-CN", "Asia/Shanghai",
+                        true, LocalTime.of(9, 0), LocalTime.of(18, 0), true);
+
+        NotificationPreferenceService.DeliveryWindowDecision decision = preferenceService.deliveryWindow(
+                preference, "INCIDENT_DECLARED", Instant.parse("2026-10-25T23:00:00Z"));
+
+        assertThat(decision.delayed()).isFalse();
+        assertThat(decision.reason()).contains("紧急事件");
     }
 
     private NotificationEventPreference preference(String type, boolean inApp, boolean email, boolean webhook) {

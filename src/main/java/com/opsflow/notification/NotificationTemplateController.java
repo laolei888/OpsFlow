@@ -30,9 +30,10 @@ public class NotificationTemplateController {
     public ApiResponse<List<NotificationTemplateService.TemplateView>> list(
             @RequestParam(required = false) String eventType,
             @RequestParam(required = false) NotificationChannel channel,
+            @RequestParam(required = false) String locale,
             @AuthenticationPrincipal AuthPrincipal principal) {
         requireAdmin(principal);
-        return ApiResponse.ok(templateService.list(principal.tenantId(), eventType, channel));
+        return ApiResponse.ok(templateService.list(principal.tenantId(), eventType, channel, locale));
     }
 
     @GetMapping("/{id}")
@@ -66,6 +67,24 @@ public class NotificationTemplateController {
         requireAdmin(principal);
         return ApiResponse.ok(templateService.createVersion(id, request.command(), principal.tenantId(), principal.id()),
                 "模板草稿版本已创建");
+    }
+
+    @PostMapping("/versions/{versionId}/submit")
+    public ApiResponse<NotificationTemplateService.VersionView> submit(
+            @PathVariable Long versionId, @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(templateService.submit(versionId, principal.tenantId(), principal.id()),
+                "通知模板版本已提交审核");
+    }
+
+    @PostMapping("/versions/{versionId}/review")
+    public ApiResponse<NotificationTemplateService.VersionView> review(
+            @PathVariable Long versionId, @Valid @RequestBody ReviewRequest request,
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(templateService.review(versionId, request.command(), principal.tenantId(), principal.id()),
+                request.decision() == NotificationTemplateService.ReviewDecision.APPROVE
+                        ? "通知模板版本已批准" : "通知模板版本已驳回");
     }
 
     @PostMapping("/versions/{versionId}/publish")
@@ -102,11 +121,12 @@ public class NotificationTemplateController {
                                 @Size(max = 500) String description,
                                 @NotBlank @Size(max = 64) String eventType,
                                 @NotNull NotificationChannel channel,
+                                @Size(max = 16) String locale,
                                 @NotBlank @Size(max = 300) String titleTemplate,
                                 @NotBlank @Size(max = 20000) String contentTemplate,
                                 @Size(max = 500) String changeNote) {
         NotificationTemplateService.CreateCommand command() {
-            return new NotificationTemplateService.CreateCommand(name, description, eventType, channel,
+            return new NotificationTemplateService.CreateCommand(name, description, eventType, channel, locale,
                     titleTemplate, contentTemplate, changeNote);
         }
     }
@@ -122,6 +142,13 @@ public class NotificationTemplateController {
                                  @Size(max = 500) String changeNote) {
         NotificationTemplateService.VersionCommand command() {
             return new NotificationTemplateService.VersionCommand(titleTemplate, contentTemplate, changeNote);
+        }
+    }
+
+    public record ReviewRequest(@NotNull NotificationTemplateService.ReviewDecision decision,
+                                @Size(max = 500) String comment) {
+        NotificationTemplateService.ReviewCommand command() {
+            return new NotificationTemplateService.ReviewCommand(decision, comment);
         }
     }
 }

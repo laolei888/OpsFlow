@@ -20,6 +20,11 @@ public class NotificationTemplateVersion {
     private String contentTemplate;
     private String changeNote;
     private Long createdBy;
+    private Long submittedBy;
+    private LocalDateTime submittedAt;
+    private Long reviewedBy;
+    private LocalDateTime reviewedAt;
+    private String reviewComment;
     private Long publishedBy;
     private LocalDateTime publishedAt;
     private LocalDateTime createdAt;
