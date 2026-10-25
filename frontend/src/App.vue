@@ -5,6 +5,7 @@ const AlertCenter = defineAsyncComponent(() => import('./components/AlertCenter.
 const AttachmentSecurityCenter = defineAsyncComponent(() => import('./components/AttachmentSecurityCenter.vue'))
 const AsyncMessageCenter = defineAsyncComponent(() => import('./components/AsyncMessageCenter.vue'))
 const CapacityPlanningCenter = defineAsyncComponent(() => import('./components/CapacityPlanningCenter.vue'))
+const DisasterRecoveryCenter = defineAsyncComponent(() => import('./components/DisasterRecoveryCenter.vue'))
 const NotificationPreferenceModal = defineAsyncComponent(() => import('./components/NotificationPreferenceModal.vue'))
 const GlobalSearch = defineAsyncComponent(() => import('./components/GlobalSearch.vue'))
 const IncidentCommandCenter = defineAsyncComponent(() => import('./components/IncidentCommandCenter.vue'))
@@ -343,6 +344,11 @@ Object.assign(auditLabels, {
   CAPACITY_ALERT_NOTIFICATION_SUPPRESSED: '抑制容量预警通知', CAPACITY_ALERT_NOTIFICATION_RELEASED: '恢复容量预警通知',
   CAPACITY_POLICY_UPDATED: '更新容量策略', CAPACITY_MAINTENANCE_CREATED: '创建容量维护窗口',
   CAPACITY_MAINTENANCE_UPDATED: '更新容量维护窗口', CAPACITY_MAINTENANCE_DELETED: '删除容量维护窗口',
+  DISASTER_RECOVERY_POLICY_UPDATED: '更新灾备策略', BACKUP_SNAPSHOT_REGISTERED: '登记备份制品',
+  BACKUP_SNAPSHOT_VERIFIED: '校验备份制品', RECOVERY_DRILL_CREATED: '创建恢复演练',
+  RECOVERY_DRILL_STARTED: '开始恢复演练', RECOVERY_DRILL_CHECK_UPDATED: '记录演练检查证据',
+  RECOVERY_DRILL_PASSED: '恢复演练通过', RECOVERY_DRILL_FAILED: '恢复演练失败',
+  RECOVERY_DRILL_CANCELLED: '取消恢复演练',
   NOTIFICATION_PREFERENCES_UPDATED: '更新通知偏好', NOTIFICATION_DELIVERY_RETRY: '重试通知投递'
 })
 const auditActionOptions = [
@@ -450,6 +456,15 @@ const auditActionOptions = [
   { value: 'CAPACITY_MAINTENANCE_CREATED', label: '创建容量维护窗口' },
   { value: 'CAPACITY_MAINTENANCE_UPDATED', label: '更新容量维护窗口' },
   { value: 'CAPACITY_MAINTENANCE_DELETED', label: '删除容量维护窗口' },
+  { value: 'DISASTER_RECOVERY_POLICY_UPDATED', label: '更新灾备策略' },
+  { value: 'BACKUP_SNAPSHOT_REGISTERED', label: '登记备份制品' },
+  { value: 'BACKUP_SNAPSHOT_VERIFIED', label: '校验备份制品' },
+  { value: 'RECOVERY_DRILL_CREATED', label: '创建恢复演练' },
+  { value: 'RECOVERY_DRILL_STARTED', label: '开始恢复演练' },
+  { value: 'RECOVERY_DRILL_CHECK_UPDATED', label: '记录演练检查证据' },
+  { value: 'RECOVERY_DRILL_PASSED', label: '恢复演练通过' },
+  { value: 'RECOVERY_DRILL_FAILED', label: '恢复演练失败' },
+  { value: 'RECOVERY_DRILL_CANCELLED', label: '取消恢复演练' },
   { value: 'NOTIFICATION_PREFERENCES_UPDATED', label: '更新通知偏好' },
   { value: 'NOTIFICATION_DELIVERY_RETRY', label: '重试通知投递' }
 ]
@@ -528,8 +543,8 @@ const filteredCmdbAssets = computed(() => {
 const cmdbActiveCount = computed(() => cmdbAssets.value.filter(asset => asset.status === 'ACTIVE').length)
 const cmdbCriticalCount = computed(() => cmdbAssets.value.filter(asset => ['CRITICAL', 'HIGH'].includes(asset.criticality) && asset.status !== 'RETIRED').length)
 const availableTicketAssets = computed(() => cmdbAssets.value.filter(asset => asset.status !== 'RETIRED' && !ticketAssetLinks.value.some(link => String(link.assetId) === String(asset.id))))
-const pageEyebrow = computed(() => ({ overview: 'OVERVIEW', workbench: 'UNIFIED OPERATIONS', supportGroups: 'TEAM ROUTING', tickets: 'TICKETS', satisfaction: 'CUSTOMER SATISFACTION', catalog: 'SERVICE CATALOG', changes: 'CHANGE MANAGEMENT', releases: 'RELEASE GOVERNANCE', runbooks: 'RUNBOOK ORCHESTRATION', problems: 'PROBLEM MANAGEMENT', alerts: 'OBSERVABILITY ALERTS', reliability: 'RELIABILITY ENGINEERING', statusPage: 'SERVICE STATUS', incidents: 'INCIDENT COMMAND', postmortems: 'POST-INCIDENT REVIEW', oncall: 'ON-CALL & ESCALATION', cmdb: 'CONFIGURATION MANAGEMENT', messages: 'ASYNC MESSAGE OPERATIONS', attachmentSecurity: 'QUARANTINE & MALWARE DEFENSE', capacity: 'CAPACITY & RELEASE BASELINE', integrations: 'INTEGRATION CENTER', team: 'TEAM ADMIN', knowledge: 'KNOWLEDGE BASE' })[activeView.value] || 'OPSFLOW')
-const pageTitle = computed(() => activeView.value === 'overview' ? '早上好，' + displayName.value : ({ workbench: '运营待办', supportGroups: '支持组队列', tickets: '工单中心', satisfaction: '服务评价与质量', catalog: '服务目录', changes: '变更管理', releases: '发布治理', runbooks: '运行手册', problems: '问题管理', alerts: '监控告警', reliability: '可靠性 SLO', statusPage: '服务状态', incidents: '事件指挥台', postmortems: '事件复盘', oncall: '值班与升级', cmdb: '资产与配置项', messages: '异步消息中心', attachmentSecurity: '附件安全中心', capacity: '容量规划中心', integrations: '集成中心', team: '团队管理', knowledge: '知识库' })[activeView.value] || 'OpsFlow')
+const pageEyebrow = computed(() => ({ overview: 'OVERVIEW', workbench: 'UNIFIED OPERATIONS', supportGroups: 'TEAM ROUTING', tickets: 'TICKETS', satisfaction: 'CUSTOMER SATISFACTION', catalog: 'SERVICE CATALOG', changes: 'CHANGE MANAGEMENT', releases: 'RELEASE GOVERNANCE', runbooks: 'RUNBOOK ORCHESTRATION', problems: 'PROBLEM MANAGEMENT', alerts: 'OBSERVABILITY ALERTS', reliability: 'RELIABILITY ENGINEERING', statusPage: 'SERVICE STATUS', incidents: 'INCIDENT COMMAND', postmortems: 'POST-INCIDENT REVIEW', oncall: 'ON-CALL & ESCALATION', cmdb: 'CONFIGURATION MANAGEMENT', messages: 'ASYNC MESSAGE OPERATIONS', attachmentSecurity: 'QUARANTINE & MALWARE DEFENSE', capacity: 'CAPACITY & RELEASE BASELINE', disasterRecovery: 'BACKUP & DISASTER RECOVERY', integrations: 'INTEGRATION CENTER', team: 'TEAM ADMIN', knowledge: 'KNOWLEDGE BASE' })[activeView.value] || 'OPSFLOW')
+const pageTitle = computed(() => activeView.value === 'overview' ? '早上好，' + displayName.value : ({ workbench: '运营待办', supportGroups: '支持组队列', tickets: '工单中心', satisfaction: '服务评价与质量', catalog: '服务目录', changes: '变更管理', releases: '发布治理', runbooks: '运行手册', problems: '问题管理', alerts: '监控告警', reliability: '可靠性 SLO', statusPage: '服务状态', incidents: '事件指挥台', postmortems: '事件复盘', oncall: '值班与升级', cmdb: '资产与配置项', messages: '异步消息中心', attachmentSecurity: '附件安全中心', capacity: '容量规划中心', disasterRecovery: '备份与灾难恢复', integrations: '集成中心', team: '团队管理', knowledge: '知识库' })[activeView.value] || 'OpsFlow')
 const activeCount = computed(() => dashboardOverview.value?.active ?? tickets.value.filter(ticket => ['OPEN', 'IN_PROGRESS', 'WAITING_CONFIRMATION'].includes(ticket.status)).length)
 const urgentCount = computed(() => dashboardOverview.value?.urgent ?? tickets.value.filter(ticket => ticket.priority === 'URGENT').length)
 const resolvedCount = computed(() => dashboardOverview.value?.resolved ?? tickets.value.filter(ticket => ['RESOLVED', 'CLOSED'].includes(ticket.status)).length)
@@ -2980,6 +2995,7 @@ onMounted(async () => {
           <button v-if="isAdmin" :class="{ active: activeView === 'attachmentSecurity' }" @click="activeView = 'attachmentSecurity'"><b>⌾</b>附件安全</button>
           <button v-if="isAdmin" :class="{ active: activeView === 'messages' }" @click="activeView = 'messages'"><b>⇄</b>异步消息</button>
           <button v-if="isAdmin" :class="{ active: activeView === 'capacity' }" @click="activeView = 'capacity'"><b>⌁</b>容量规划</button>
+          <button v-if="isAdmin" :class="{ active: activeView === 'disasterRecovery' }" @click="activeView = 'disasterRecovery'"><b>⛨</b>备份恢复</button>
           <button v-if="isAdmin" :class="{ active: activeView === 'integrations' }" @click="activeView = 'integrations'"><b>⌁</b>集成中心<em v-if="webhookDeadCount">{{ webhookDeadCount }}</em></button>
           <button v-if="isAdmin" :class="{ active: activeView === 'team' }" @click="openTeam"><b>♙</b>团队管理<em>{{ teamUsers.length }}</em></button>
         </nav>
@@ -3005,6 +3021,7 @@ onMounted(async () => {
 <AttachmentSecurityCenter v-else-if="activeView === 'attachmentSecurity'" :api="api" />
 <AsyncMessageCenter v-else-if="activeView === 'messages'" :api="api" :download-csv="downloadCsv" />
 <CapacityPlanningCenter v-else-if="activeView === 'capacity'" :api="api" />
+<DisasterRecoveryCenter v-else-if="activeView === 'disasterRecovery'" :api="api" />
 <section v-else-if="activeView === 'tickets'" class="view-panel">
   <div class="section-toolbar">
     <div><p class="eyebrow">WORK QUEUE</p><h2>工作队列</h2></div>

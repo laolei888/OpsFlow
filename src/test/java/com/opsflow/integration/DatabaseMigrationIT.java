@@ -51,6 +51,10 @@ class DatabaseMigrationIT {
             statement.executeUpdate("DELETE FROM user_permission_overrides");
             statement.executeUpdate("DELETE FROM user_external_identities");
             statement.executeUpdate("DELETE FROM oidc_provider_mappings");
+            statement.executeUpdate("DELETE FROM recovery_drill_checks");
+            statement.executeUpdate("DELETE FROM recovery_drills");
+            statement.executeUpdate("DELETE FROM backup_snapshots");
+            statement.executeUpdate("DELETE FROM disaster_recovery_policies");
             statement.executeUpdate("DELETE FROM attachment_storage_findings");
             statement.executeUpdate("DELETE FROM attachment_storage_policies");
             statement.executeUpdate("DELETE FROM attachment_upload_sessions");
@@ -91,16 +95,39 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV50() throws SQLException {
+    void appliesEveryMigrationThroughV51() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("50", flyway.info().current().getVersion().getVersion());
-        assertEquals(50, flyway.info().applied().length);
+        assertEquals("51", flyway.info().current().getVersion().getVersion());
+        assertEquals(51, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
                      WHERE table_schema = DATABASE() AND table_name = 'attachment_upload_sessions'
                        AND column_name IN ('session_key', 'client_upload_id', 'provider_upload_id',
                                            'status', 'part_size', 'total_parts', 'expires_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(7, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = DATABASE()
+                       AND table_name IN ('disaster_recovery_policies', 'backup_snapshots',
+                                          'recovery_drills', 'recovery_drill_checks')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(4, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'recovery_drills'
+                       AND column_name IN ('version', 'target_rpo_minutes', 'target_rto_minutes',
+                                           'achieved_rpo_minutes', 'achieved_rto_minutes',
+                                           'integrity_score', 'evidence_note')
                      """);
              ResultSet result = statement.executeQuery()) {
             result.next();

@@ -46,7 +46,17 @@ const requiredOperations = [
   ['get', '/api/v1/admin/capacity/maintenance-windows'],
   ['post', '/api/v1/admin/capacity/maintenance-windows'],
   ['put', '/api/v1/admin/capacity/maintenance-windows/{id}'],
-  ['delete', '/api/v1/admin/capacity/maintenance-windows/{id}']
+  ['delete', '/api/v1/admin/capacity/maintenance-windows/{id}'],
+  ['get', '/api/v1/admin/disaster-recovery'],
+  ['put', '/api/v1/admin/disaster-recovery/policy'],
+  ['post', '/api/v1/admin/disaster-recovery/backups'],
+  ['post', '/api/v1/admin/disaster-recovery/backups/{id}/verify'],
+  ['post', '/api/v1/admin/disaster-recovery/drills'],
+  ['get', '/api/v1/admin/disaster-recovery/drills/{id}'],
+  ['post', '/api/v1/admin/disaster-recovery/drills/{id}/start'],
+  ['put', '/api/v1/admin/disaster-recovery/drills/{drillId}/checks/{checkId}'],
+  ['post', '/api/v1/admin/disaster-recovery/drills/{id}/complete'],
+  ['post', '/api/v1/admin/disaster-recovery/drills/{id}/cancel']
 ]
 
 const publicOperations = [
