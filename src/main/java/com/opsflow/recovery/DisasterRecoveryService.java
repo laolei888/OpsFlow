@@ -61,6 +61,10 @@ public class DisasterRecoveryService {
         return new DrillDetail(drill, snapshot, checks);
     }
 
+    public BackupSnapshot findSnapshot(Long id, Long tenantId) {
+        return requireSnapshot(id, tenantId);
+    }
+
     public EffectivePolicy effectivePolicy(Long tenantId) {
         DisasterRecoveryPolicy policy = policyMapper.selectOne(
                 new LambdaQueryWrapper<DisasterRecoveryPolicy>()

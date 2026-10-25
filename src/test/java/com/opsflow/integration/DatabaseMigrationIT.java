@@ -51,8 +51,12 @@ class DatabaseMigrationIT {
             statement.executeUpdate("DELETE FROM user_permission_overrides");
             statement.executeUpdate("DELETE FROM user_external_identities");
             statement.executeUpdate("DELETE FROM oidc_provider_mappings");
+            statement.executeUpdate("DELETE FROM chaos_experiment_checks");
+            statement.executeUpdate("DELETE FROM chaos_experiments");
             statement.executeUpdate("DELETE FROM recovery_drill_checks");
             statement.executeUpdate("DELETE FROM recovery_drills");
+            statement.executeUpdate("DELETE FROM backup_agent_callbacks");
+            statement.executeUpdate("DELETE FROM backup_agents");
             statement.executeUpdate("DELETE FROM backup_snapshots");
             statement.executeUpdate("DELETE FROM disaster_recovery_policies");
             statement.executeUpdate("DELETE FROM attachment_storage_findings");
@@ -95,10 +99,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV52() throws SQLException {
+    void appliesEveryMigrationThroughV53() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("52", flyway.info().current().getVersion().getVersion());
-        assertEquals(52, flyway.info().applied().length);
+        assertEquals("53", flyway.info().current().getVersion().getVersion());
+        assertEquals(53, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
@@ -115,11 +119,13 @@ class DatabaseMigrationIT {
                      SELECT COUNT(*) FROM information_schema.tables
                      WHERE table_schema = DATABASE()
                        AND table_name IN ('disaster_recovery_policies', 'backup_snapshots',
-                                          'recovery_drills', 'recovery_drill_checks')
+                                          'recovery_drills', 'recovery_drill_checks',
+                                          'backup_agents', 'backup_agent_callbacks',
+                                          'chaos_experiments', 'chaos_experiment_checks')
                      """);
              ResultSet result = statement.executeQuery()) {
             result.next();
-            assertEquals(4, result.getInt(1));
+            assertEquals(8, result.getInt(1));
         }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""

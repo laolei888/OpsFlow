@@ -18,6 +18,10 @@ security:
     secret: ${JWT_SECRET}
 
 opsflow:
+  recovery:
+    backup-agent:
+      encryption-key: ${OPSFLOW_BACKUP_AGENT_SECRET_KEY}
+      signature-tolerance: ${OPSFLOW_BACKUP_AGENT_SIGNATURE_TOLERANCE:PT5M}
   security:
     registration-enabled: false
     public-metrics: false

@@ -20,7 +20,8 @@ public class OpenApiConfig {
     private static final Set<String> PUBLIC_EXACT_PATHS = Set.of(
             "/api/v1/auth/login",
             "/api/v1/auth/register",
-            "/api/v1/status-page"
+            "/api/v1/status-page",
+            "/api/v1/backup-agent/callbacks"
     );
 
     @Bean
@@ -30,7 +31,7 @@ public class OpenApiConfig {
                         .title("OpsFlow API")
                         .version("v1")
                         .description("企业级工单、知识库与 IT 服务管理协同平台 API。"
-                                + "除公开状态页、登录、注册和告警接入外，接口均使用 JWT Bearer Token。")
+                                + "除公开状态页、登录、注册、告警接入和签名备份回调外，接口均使用 JWT Bearer Token。")
                         .contact(new Contact().name("OpsFlow Engineering")))
                 .components(new Components().addSecuritySchemes(BEARER_AUTH,
                         new SecurityScheme()

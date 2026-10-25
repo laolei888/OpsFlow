@@ -117,6 +117,10 @@ security:
     ttl: ${JWT_TTL:PT2H}
 
 opsflow:
+  recovery:
+    backup-agent:
+      encryption-key: ${OPSFLOW_BACKUP_AGENT_SECRET_KEY:opsflow-local-backup-agent-secret-key-change-me}
+      signature-tolerance: ${OPSFLOW_BACKUP_AGENT_SIGNATURE_TOLERANCE:PT5M}
   security:
     registration-enabled: ${OPSFLOW_REGISTRATION_ENABLED:true}
     public-metrics: ${OPSFLOW_PUBLIC_METRICS:true}

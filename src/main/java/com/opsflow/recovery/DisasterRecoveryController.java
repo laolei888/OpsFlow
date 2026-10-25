@@ -22,12 +22,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/admin/disaster-recovery")
 @RequiredArgsConstructor
 public class DisasterRecoveryController {
     private final DisasterRecoveryService service;
+    private final BackupAgentService backupAgentService;
 
     @GetMapping
     public ApiResponse<DisasterRecoveryService.RecoveryCenterView> center(
@@ -58,6 +60,44 @@ public class DisasterRecoveryController {
         requireAdmin(principal);
         return ApiResponse.ok(service.verifyBackup(id, principal.tenantId(), principal.id()),
                 "备份校验已完成");
+    }
+
+    @GetMapping("/agents")
+    public ApiResponse<List<BackupAgent>> agents(@AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(backupAgentService.list(principal.tenantId()));
+    }
+
+    @PostMapping("/agents")
+    public ApiResponse<BackupAgentService.AgentCredential> createAgent(
+            @Valid @RequestBody AgentRequest request, @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(backupAgentService.create(request.command(), principal.tenantId(), principal.id()),
+                "备份 Agent 已创建，请立即保存一次性密钥");
+    }
+
+    @PostMapping("/agents/{id}/rotate")
+    public ApiResponse<BackupAgentService.AgentCredential> rotateAgent(
+            @PathVariable Long id, @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(backupAgentService.rotate(id, principal.tenantId(), principal.id()),
+                "签名密钥已轮换，旧密钥立即失效");
+    }
+
+    @PutMapping("/agents/{id}/status")
+    public ApiResponse<BackupAgent> setAgentStatus(
+            @PathVariable Long id, @Valid @RequestBody AgentStatusRequest request,
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(backupAgentService.setEnabled(id, request.enabled(), principal.tenantId(), principal.id()),
+                request.enabled() ? "备份 Agent 已启用" : "备份 Agent 已停用");
+    }
+
+    @GetMapping("/agents/{id}/callbacks")
+    public ApiResponse<List<BackupAgentCallback>> agentCallbacks(
+            @PathVariable Long id, @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(backupAgentService.callbacks(id, principal.tenantId()));
     }
 
     @PostMapping("/drills")
@@ -176,4 +216,14 @@ public class DisasterRecoveryController {
     }
 
     public record ReasonRequest(@NotBlank @Size(min = 5, max = 1000) String reason) { }
+
+    public record AgentRequest(@NotBlank @Size(min = 2, max = 120) String name,
+                               @Size(max = 500) String description,
+                               Boolean enabled) {
+        BackupAgentService.AgentCommand command() {
+            return new BackupAgentService.AgentCommand(name, description, enabled);
+        }
+    }
+
+    public record AgentStatusRequest(@NotNull Boolean enabled) { }
 }

@@ -9,6 +9,7 @@ OpsFlow 的灾备模块是控制平面，不是数据库管理员。它负责固
 - 恢复演练必须使用隔离数据库、独立对象桶或临时命名空间，不能把生产地址作为演练环境。
 - 备份登记、策略变更、校验、演练开始、门禁结果和最终结论全部写入租户审计日志。
 - 保留期后台任务只把过期台账标记为 `EXPIRED`，不会自动删除真实备份制品。
+- 外部 Agent 的签名密钥使用独立主密钥经 AES-GCM 加密后入库；明文仅在创建或轮换时返回一次。
 
 ## 策略模型
 
@@ -34,6 +35,34 @@ OpsFlow 的灾备模块是控制平面，不是数据库管理员。它负责固
 
 系统会校验备份时间顺序、SHA-256 格式、制品大小、恢复点间隔、加密要求、不可变期限和跨区域策略。结果为 `PASSED`、`WARNING` 或 `FAILED`。就绪度还会结合最新恢复点年龄与复验周期生成 `HEALTHY`、`WARNING`、`CRITICAL` 或 `DISABLED` 状态。
 
+## 外部备份 Agent 签名回调
+
+管理员可以为备份作业创建独立 Agent。创建或轮换时返回 `agentKey` 与一次性 `secret`；服务端只保存 AES-GCM 密文。Agent 把与人工登记相同的备份元数据发送到公开回调：
+
+```text
+POST /api/v1/backup-agent/callbacks
+X-OpsFlow-Agent-Key: bka_...
+X-OpsFlow-Timestamp: <Unix 秒>
+X-OpsFlow-Nonce: <8-128 位唯一随机值>
+X-OpsFlow-Signature: <64 位十六进制 HMAC-SHA256>
+```
+
+签名原文严格按以下五行拼接，其中 `payloadHash` 是原始 HTTP 请求体字节的 SHA-256 十六进制值：
+
+```text
+POST
+/api/v1/backup-agent/callbacks
+{timestamp}
+{nonce}
+{payloadHash}
+```
+
+服务端使用 Agent secret 计算 HMAC-SHA256，并采用常量时间比较。时间戳默认只允许前后 5 分钟，`nonce` 在同一 Agent 内不可复用，`eventId` 提供业务幂等：同一事件与同一请求体会返回原备份记录；同一 `eventId` 携带不同内容会被拒绝。只有验签成功后才解析业务 JSON、登记备份并更新 Agent 最近心跳。
+
+成功接收和幂等重放返回 HTTP 200；缺失签名头、过期时间戳、签名错误、nonce 重放或负载校验失败返回 HTTP 400；超过入口速率限制返回 HTTP 429。Agent 只能把 2xx 视为投递成功。
+
+生产环境必须设置独立的 `OPSFLOW_BACKUP_AGENT_SECRET_KEY`，长度至少 32 个字符，并由 Secret Manager 注入和备份。直接更换该主密钥会使旧 Agent 密文无法解密，应先逐个轮换 Agent 或实施双密钥迁移。
+
 ## 隔离恢复演练
 
 使用可用备份创建演练时，系统会固化当时的 RPO/RTO，并生成以下门禁：
@@ -57,6 +86,11 @@ GET  /api/v1/admin/disaster-recovery
 PUT  /api/v1/admin/disaster-recovery/policy
 POST /api/v1/admin/disaster-recovery/backups
 POST /api/v1/admin/disaster-recovery/backups/{id}/verify
+GET  /api/v1/admin/disaster-recovery/agents
+POST /api/v1/admin/disaster-recovery/agents
+POST /api/v1/admin/disaster-recovery/agents/{id}/rotate
+PUT  /api/v1/admin/disaster-recovery/agents/{id}/status
+GET  /api/v1/admin/disaster-recovery/agents/{id}/callbacks
 POST /api/v1/admin/disaster-recovery/drills
 GET  /api/v1/admin/disaster-recovery/drills/{id}
 POST /api/v1/admin/disaster-recovery/drills/{id}/start
@@ -70,5 +104,5 @@ POST /api/v1/admin/disaster-recovery/drills/{id}/cancel
 1. 使用云数据库 PITR、MySQL Enterprise Backup 或受控 `mysqldump` 作业生成数据库制品。
 2. 为对象存储启用版本控制、Object Lock 和跨区域复制。
 3. 使用 KMS 管理备份密钥，应用日志和台账中不得保存访问密钥。
-4. 外部备份作业完成后由受签名保护的 Agent 回调登记制品；当前版本先由管理员登记。
+4. 外部备份作业完成后由受签名保护的 Agent 回调登记制品，每个环境使用独立 Agent，并定期轮换密钥。
 5. 至少每季度执行一次完整恢复演练，并把演练发现转成问题、变更或容量治理任务。

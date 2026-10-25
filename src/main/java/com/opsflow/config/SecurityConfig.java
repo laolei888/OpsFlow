@@ -49,6 +49,7 @@ public class SecurityConfig {
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
                     auth.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico",
                                 "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/alert-ingest/**",
+                                "/api/v1/backup-agent/callbacks",
                                 "/api/v1/auth/sso/**", "/oauth2/**", "/login/oauth2/**", "/sso/callback",
                                 "/status", "/api/v1/status-page", "/api/v1/status-page/**",
                                 "/docs", "/docs/**", "/swagger-ui/**", "/api-docs", "/api-docs/**",
@@ -98,7 +99,8 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key",
+                "X-OpsFlow-Agent-Key", "X-OpsFlow-Timestamp", "X-OpsFlow-Nonce", "X-OpsFlow-Signature"));
         configuration.setExposedHeaders(List.of("X-Request-Id", "X-Trace-Id", "X-Span-Id", "Server-Timing",
                 "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"));
         configuration.setAllowCredentials(false);

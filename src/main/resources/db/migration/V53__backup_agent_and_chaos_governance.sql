@@ -1,0 +1,81 @@
+CREATE TABLE IF NOT EXISTS backup_agents (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    agent_key VARCHAR(40) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    description VARCHAR(500) NULL,
+    secret_ciphertext VARCHAR(512) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    last_seen_at DATETIME NULL,
+    last_event_id VARCHAR(128) NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_backup_agent_key (agent_key),
+    UNIQUE KEY uk_backup_agent_name (tenant_id, name),
+    INDEX idx_backup_agent_tenant_status (tenant_id, enabled, updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS backup_agent_callbacks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    agent_id BIGINT NOT NULL,
+    event_id VARCHAR(128) NOT NULL,
+    nonce VARCHAR(128) NOT NULL,
+    payload_sha256 CHAR(64) NOT NULL,
+    backup_snapshot_id BIGINT NOT NULL,
+    received_at DATETIME NOT NULL,
+    UNIQUE KEY uk_backup_agent_event (agent_id, event_id),
+    UNIQUE KEY uk_backup_agent_nonce (agent_id, nonce),
+    INDEX idx_backup_agent_callback_tenant (tenant_id, received_at),
+    CONSTRAINT fk_backup_callback_agent FOREIGN KEY (agent_id) REFERENCES backup_agents(id),
+    CONSTRAINT fk_backup_callback_snapshot FOREIGN KEY (backup_snapshot_id) REFERENCES backup_snapshots(id)
+);
+
+CREATE TABLE IF NOT EXISTS chaos_experiments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    experiment_no VARCHAR(32) NOT NULL,
+    name VARCHAR(160) NOT NULL,
+    target VARCHAR(40) NOT NULL,
+    environment VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    version INT NOT NULL DEFAULT 0,
+    hypothesis VARCHAR(1000) NOT NULL,
+    rollback_plan VARCHAR(1000) NOT NULL,
+    target_recovery_minutes INT NOT NULL,
+    started_at DATETIME NULL,
+    fault_started_at DATETIME NULL,
+    recovery_started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    achieved_recovery_seconds BIGINT NULL,
+    findings VARCHAR(2000) NULL,
+    cancellation_reason VARCHAR(1000) NULL,
+    created_by BIGINT NOT NULL,
+    updated_by BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_chaos_experiment_no (tenant_id, experiment_no),
+    INDEX idx_chaos_experiment_status (tenant_id, status, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS chaos_experiment_checks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    experiment_id BIGINT NOT NULL,
+    phase VARCHAR(24) NOT NULL,
+    check_key VARCHAR(64) NOT NULL,
+    label VARCHAR(160) NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+    required_check BOOLEAN NOT NULL DEFAULT TRUE,
+    detail VARCHAR(1000) NULL,
+    evidence VARCHAR(1000) NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    updated_by BIGINT NULL,
+    checked_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_chaos_experiment_check (experiment_id, check_key),
+    INDEX idx_chaos_check_status (tenant_id, experiment_id, phase, status),
+    CONSTRAINT fk_chaos_check_experiment FOREIGN KEY (experiment_id) REFERENCES chaos_experiments(id)
+);
