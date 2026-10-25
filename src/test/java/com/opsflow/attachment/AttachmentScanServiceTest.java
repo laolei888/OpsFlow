@@ -57,7 +57,7 @@ class AttachmentScanServiceTest {
             return new MaterializedAttachment(tempDir.resolve(item.getStoragePath()), () -> { });
         });
         lenient().when(storageService.exists(any(TicketAttachment.class))).thenReturn(true);
-        lenient().doAnswer(invocation -> {
+        lenient().when(storageService.move(any(TicketAttachment.class), any(String.class))).thenAnswer(invocation -> {
             TicketAttachment item = invocation.getArgument(0);
             String targetKey = invocation.getArgument(1);
             Path source = tempDir.resolve(item.getStoragePath());
@@ -65,8 +65,8 @@ class AttachmentScanServiceTest {
             Files.createDirectories(target.getParent());
             Files.copy(source, target);
             Files.delete(source);
-            return null;
-        }).when(storageService).move(any(TicketAttachment.class), any(String.class));
+            return new StoredAttachmentObject("moved-etag", "moved-version");
+        });
     }
 
     @Test

@@ -26,6 +26,19 @@ OpsFlow 的附件业务通过 `AttachmentObjectStore` 适配层与具体介质�
 
 默认上限为 1 GiB，分片签名 15 分钟有效。S3 单分片除最后一片外不得小于 5 MiB，配置校验会阻止不合法的分片大小。浏览器直传需要对象桶允许 OpsFlow 页面来源执行 `PUT`；本地 RustFS profile 会自动配置 `http://localhost:8081`，托管 S3 建议由基础设施代码显式管理 CORS，并保持应用侧自动配置关闭。
 
+## 租户配额与对象一致性治理
+
+每个租户拥有独立附件配额。系统在普通上传事务和 Multipart 会话创建事务中锁定租户策略行，并以“业务附件大小 + 未结束上传会话的声明大小”计算占用，避免并发请求同时通过检查。默认配额为 10 GiB、预警阈值为 80%，管理员可以在附件安全中心调整；新配额不得低于当前已使用与预留空间。
+
+后台默认每 6 小时执行一次只读巡检，也可以由管理员立即触发。巡检分别读取 `quarantine/{tenantId}/` 和 `clean/{tenantId}/`：
+
+- 对象或版本没有附件记录、活动上传会话引用时，记录为孤儿对象。
+- 已引用对象的非当前 S3 版本记录为历史版本；最新版本始终受到保护。
+- 无业务引用的 S3 删除标记单独展示，避免清理版本时遗漏。
+- 数据库引用对应的最新对象不存在时产生缺失对象告警，该类型只能排障或忽略，不能执行删除。
+
+系统不会定时删除对象。孤儿对象和历史版本经过默认 24 小时观察期后，管理员仍需在页面逐项确认；服务端删除前会再次查询附件及活动上传会话，校验对象键，并把操作者、原因、对象键、版本号和大小写入审计日志。这样既能回收复制移动、事务回滚或外部工具遗留的对象，也不会让配置错误直接演变成数据丢失。
+
 ## 本地 S3 演示
 
 仓库的开发 profile 使用 RustFS 1.0.3 提供本地 S3 兼容端点。OpsFlow 只依赖标准 S3 API，连接已有 MinIO、Amazon S3 或其他兼容服务时不需要修改业务代码。
@@ -44,12 +57,18 @@ OPSFLOW_STORAGE_S3_BUCKET=opsflow-attachments
 OPSFLOW_STORAGE_S3_PATH_STYLE=true
 OPSFLOW_STORAGE_S3_AUTO_CREATE_BUCKET=true
 OPSFLOW_STORAGE_S3_AUTO_CONFIGURE_CORS=true
+OPSFLOW_STORAGE_S3_AUTO_CONFIGURE_VERSIONING=true
 OPSFLOW_STORAGE_S3_CORS_ALLOWED_ORIGINS=http://localhost:8081
 OPSFLOW_STORAGE_MULTIPART_ENABLED=true
 OPSFLOW_STORAGE_MULTIPART_PART_SIZE=8388608
 OPSFLOW_STORAGE_MULTIPART_MAX_FILE_SIZE=1073741824
 OPSFLOW_STORAGE_MULTIPART_PRESIGNED_TTL=PT15M
 OPSFLOW_STORAGE_MULTIPART_SESSION_TTL=PT24H
+OPSFLOW_STORAGE_GOVERNANCE_ENABLED=true
+OPSFLOW_STORAGE_DEFAULT_QUOTA_BYTES=10737418240
+OPSFLOW_STORAGE_DEFAULT_WARNING_PERCENT=80
+OPSFLOW_STORAGE_ORPHAN_GRACE_PERIOD=PT24H
+OPSFLOW_STORAGE_MAX_OBJECTS_PER_SCAN=10000
 ```
 
 然后启动对象存储 profile：
@@ -72,9 +91,13 @@ OPSFLOW_STORAGE_S3_BUCKET=company-opsflow-attachments
 OPSFLOW_STORAGE_S3_PATH_STYLE=false
 OPSFLOW_STORAGE_S3_AUTO_CREATE_BUCKET=false
 OPSFLOW_STORAGE_S3_AUTO_CONFIGURE_CORS=false
+OPSFLOW_STORAGE_S3_AUTO_CONFIGURE_VERSIONING=false
 OPSFLOW_STORAGE_MULTIPART_ENABLED=true
 OPSFLOW_STORAGE_MULTIPART_PART_SIZE=8388608
 OPSFLOW_STORAGE_MULTIPART_MAX_FILE_SIZE=1073741824
+OPSFLOW_STORAGE_GOVERNANCE_ENABLED=true
+OPSFLOW_STORAGE_DEFAULT_QUOTA_BYTES=10737418240
+OPSFLOW_STORAGE_ORPHAN_GRACE_PERIOD=PT24H
 ```
 
 AWS 环境可不填写静态密钥，改用实例、容器或工作负载身份；其他 S3 兼容服务可额外配置内部 `OPSFLOW_STORAGE_S3_ENDPOINT` 和浏览器可访问的 `OPSFLOW_STORAGE_S3_PUBLIC_ENDPOINT`。两个静态密钥必须同时设置，且只允许通过部署密钥系统注入。
@@ -84,6 +107,8 @@ AWS 环境可不填写静态密钥，改用实例、容器或工作负载身份�
 ## 运维验证
 
 - `GET /api/v1/admin/attachment-security/storage` 查看当前后端、可用适配器、桶名和预签名有效期。
+- `GET /api/v1/admin/attachment-security/governance/summary` 查看配额、占用、预留、可回收空间和缺失对象数量。
+- `POST /api/v1/admin/attachment-security/governance/reconcile` 立即执行当前租户对象一致性巡检；结果较大时会返回 `truncated=true`，应先提高扫描上限或缩小桶内非 OpsFlow 数据范围。
 - `GET /api/v1/tickets/{ticketId}/attachments/upload-capabilities` 查看普通上传上限、分片上限、分片大小与会话有效期。
 - 上传测试附件后确认数据库 `storage_backend` 为 `S3`，并观察对象从 `quarantine/` 移动到 `clean/`。
 - 复制预签名地址时不得写入工单评论、日志或监控标签；该地址虽然短时有效，但在失效前等同于临时凭据。

@@ -155,9 +155,11 @@ public class AttachmentScanService {
         AttachmentScanStatus before = attachment.getScanStatus();
         String previousPath = attachment.getStoragePath();
         String cleanPath = cleanRelativePath(attachment);
-        moveWithRollback(attachment, cleanPath);
+        StoredAttachmentObject moved = moveWithRollback(attachment, cleanPath);
         LocalDateTime now = LocalDateTime.now();
         attachment.setStoragePath(cleanPath);
+        attachment.setStorageEtag(moved.etag());
+        attachment.setStorageVersion(moved.versionId());
         attachment.setScanStatus(AttachmentScanStatus.RELEASED);
         attachment.setReleasedBy(actorId);
         attachment.setReleasedAt(now);
@@ -199,9 +201,11 @@ public class AttachmentScanService {
         TicketAttachment attachment = currentClaim(attempt);
         if (attachment == null) return;
         String cleanPath = cleanRelativePath(attachment);
-        moveWithRollback(attachment, cleanPath);
+        StoredAttachmentObject moved = moveWithRollback(attachment, cleanPath);
         LocalDateTime now = LocalDateTime.now();
         attachment.setStoragePath(cleanPath);
+        attachment.setStorageEtag(moved.etag());
+        attachment.setStorageVersion(moved.versionId());
         attachment.setScanStatus(AttachmentScanStatus.CLEAN);
         applyResult(attachment, result, now);
         attachmentMapper.updateById(attachment);
@@ -270,12 +274,12 @@ public class AttachmentScanService {
         return "clean/" + attachment.getTenantId() + "/" + attachment.getTicketId() + "/" + attachment.getStoredName();
     }
 
-    private void moveWithRollback(TicketAttachment attachment, String targetKey) {
+    private StoredAttachmentObject moveWithRollback(TicketAttachment attachment, String targetKey) {
         String sourceKey = attachment.getStoragePath();
         AttachmentStorageType backend = attachment.getStorageBackend() == null
                 ? AttachmentStorageType.LOCAL : attachment.getStorageBackend();
-        storageService.move(attachment, targetKey);
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
+        StoredAttachmentObject moved = storageService.move(attachment, targetKey);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) return moved;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
@@ -288,6 +292,7 @@ public class AttachmentScanService {
                 }
             }
         });
+        return moved;
     }
 
     private void requireStoredFile(TicketAttachment attachment) {

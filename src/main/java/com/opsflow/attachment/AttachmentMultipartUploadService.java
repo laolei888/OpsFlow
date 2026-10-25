@@ -30,6 +30,7 @@ public class AttachmentMultipartUploadService {
     private final TicketService ticketService;
     private final AuditLogService auditLogService;
     private final AttachmentStorageService storageService;
+    private final AttachmentStorageQuotaService quotaService;
     private final TransactionTemplate transactionTemplate;
 
     public AttachmentStorageService.MultipartCapabilities capabilities(Long ticketId, Long tenantId,
@@ -90,6 +91,7 @@ public class AttachmentMultipartUploadService {
         session.setUpdatedAt(now);
         try {
             transactionTemplate.executeWithoutResult(status -> {
+                quotaService.assertCanStore(tenantId, sizeBytes);
                 sessionMapper.insert(session);
                 auditLogService.record(tenantId, uploaderId, "TICKET", ticketId,
                         "ATTACHMENT_MULTIPART_STARTED", null,

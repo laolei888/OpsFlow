@@ -30,6 +30,8 @@ class TicketAttachmentServiceTest {
     private AuditLogService auditLogService;
     @Mock
     private AttachmentStorageService storageService;
+    @Mock
+    private AttachmentStorageQuotaService quotaService;
 
     @InjectMocks
     private TicketAttachmentService attachmentService;
@@ -55,6 +57,7 @@ class TicketAttachmentServiceTest {
 
         verify(ticketService).getVisible(1L, 1L, 7L);
         verify(attachmentMapper).insert(any(TicketAttachment.class));
+        verify(quotaService).assertCanStore(1L, file.getSize());
         assertEquals(AttachmentScanStatus.PENDING, saved.getScanStatus());
         assertEquals(AttachmentStorageType.LOCAL, saved.getStorageBackend());
         assertTrue(saved.getStoragePath().startsWith("quarantine/"));

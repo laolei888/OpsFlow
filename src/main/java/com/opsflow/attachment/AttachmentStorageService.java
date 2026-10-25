@@ -69,12 +69,12 @@ public class AttachmentStorageService {
         return storeFor(attachment).materialize(validKey(attachment.getStoragePath()));
     }
 
-    public void move(TicketAttachment attachment, String targetKey) {
-        storeFor(attachment).move(validKey(attachment.getStoragePath()), validKey(targetKey));
+    public StoredAttachmentObject move(TicketAttachment attachment, String targetKey) {
+        return storeFor(attachment).move(validKey(attachment.getStoragePath()), validKey(targetKey));
     }
 
-    public void move(AttachmentStorageType type, String sourceKey, String targetKey) {
-        requireStore(type).move(validKey(sourceKey), validKey(targetKey));
+    public StoredAttachmentObject move(AttachmentStorageType type, String sourceKey, String targetKey) {
+        return requireStore(type).move(validKey(sourceKey), validKey(targetKey));
     }
 
     public void delete(TicketAttachment attachment) {
@@ -128,6 +128,23 @@ public class AttachmentStorageService {
         return requireStore(type).metadata(validKey(key));
     }
 
+    public StoredObjectInventory inventory(AttachmentStorageType type, String prefix, int limit) {
+        AttachmentObjectStore store = requireStore(type);
+        if (!store.supportsInventory()) {
+            throw new AttachmentStorageException("当前附件存储后端不支持对象巡检");
+        }
+        return store.inventory(validPrefix(prefix), Math.max(1, limit));
+    }
+
+    public void deleteVersion(AttachmentStorageType type, String key, String versionId) {
+        requireStore(type).deleteVersion(validKey(key), versionId);
+    }
+
+    public List<AttachmentStorageType> inventoryBackends() {
+        return stores.values().stream().filter(AttachmentObjectStore::supportsInventory)
+                .map(AttachmentObjectStore::type).sorted().toList();
+    }
+
     public Optional<PresignedObject> presignDownload(TicketAttachment attachment) {
         Duration ttl = properties.getPresignedDownloadTtl();
         if (ttl.isNegative() || ttl.isZero()) return Optional.empty();
@@ -177,6 +194,16 @@ public class AttachmentStorageService {
             }
         }
         return value;
+    }
+
+    private String validPrefix(String value) {
+        if (value == null || value.isBlank() || value.startsWith("/") || value.contains("\\")
+                || value.chars().anyMatch(Character::isISOControl)) {
+            throw new AttachmentStorageException("附件对象前缀非法");
+        }
+        String normalized = value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+        validKey(normalized);
+        return normalized + "/";
     }
 
     public record StorageStatus(AttachmentStorageType configuredBackend,

@@ -21,6 +21,9 @@ import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListPartsRequest;
 import software.amazon.awssdk.services.s3.model.ListPartsResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectVersionsRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectVersionsResponse;
+import software.amazon.awssdk.services.s3.model.ObjectVersion;
 import software.amazon.awssdk.services.s3.model.Part;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -103,5 +106,28 @@ class S3AttachmentObjectStoreTest {
         assertEquals(2, parts.size());
         assertEquals("v1", completed.versionId());
         assertEquals(11L, metadata.sizeBytes());
+    }
+
+    @Test
+    void inventoriesAndDeletesSpecificObjectVersions() {
+        when(client.listObjectVersions(any(ListObjectVersionsRequest.class)))
+                .thenReturn(ListObjectVersionsResponse.builder()
+                        .isTruncated(false)
+                        .versions(ObjectVersion.builder().key("clean/1/7/file.txt").versionId("v2")
+                                        .isLatest(true).size(12L).eTag("new").build(),
+                                ObjectVersion.builder().key("clean/1/7/file.txt").versionId("v1")
+                                        .isLatest(false).size(10L).eTag("old").build())
+                        .build());
+        when(client.deleteObject(any(DeleteObjectRequest.class)))
+                .thenReturn(DeleteObjectResponse.builder().build());
+
+        StoredObjectInventory inventory = store.inventory("clean/1/", 10);
+        store.deleteVersion("clean/1/7/file.txt", "v1");
+
+        assertEquals(2, inventory.items().size());
+        assertEquals("v2", inventory.items().get(0).versionId());
+        ArgumentCaptor<DeleteObjectRequest> request = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+        verify(client).deleteObject(request.capture());
+        assertEquals("v1", request.getValue().versionId());
     }
 }

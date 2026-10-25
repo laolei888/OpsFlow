@@ -37,6 +37,10 @@ class LocalAttachmentObjectStoreTest {
         assertFalse(store.exists("quarantine/1/7/file.txt"));
         assertTrue(store.exists("clean/1/7/file.txt"));
         assertEquals("safe evidence", store.load("clean/1/7/file.txt").getContentAsString(StandardCharsets.UTF_8));
+        StoredObjectInventory inventory = store.inventory("clean/1/", 10);
+        assertEquals(1, inventory.items().size());
+        assertEquals("clean/1/7/file.txt", inventory.items().get(0).key());
+        assertFalse(inventory.truncated());
 
         store.delete("clean/1/7/file.txt");
         assertFalse(store.exists("clean/1/7/file.txt"));

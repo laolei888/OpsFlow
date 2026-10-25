@@ -7,11 +7,15 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -66,7 +70,7 @@ public class LocalAttachmentObjectStore implements AttachmentObjectStore {
     }
 
     @Override
-    public void move(String sourceKey, String targetKey) {
+    public StoredAttachmentObject move(String sourceKey, String targetKey) {
         Path source = resolve(sourceKey);
         Path target = resolve(targetKey);
         if (!Files.isRegularFile(source)) throw new AttachmentStorageException("附件源对象不存在");
@@ -74,6 +78,7 @@ public class LocalAttachmentObjectStore implements AttachmentObjectStore {
         try {
             Files.createDirectories(target.getParent());
             moveFile(source, target);
+            return new StoredAttachmentObject(sha256(target), null);
         } catch (IOException ex) {
             throw new AttachmentStorageException("本地附件移动失败", ex);
         }
@@ -91,6 +96,34 @@ public class LocalAttachmentObjectStore implements AttachmentObjectStore {
     @Override
     public boolean exists(String key) {
         return Files.isRegularFile(resolve(key));
+    }
+
+    @Override
+    public boolean supportsInventory() {
+        return true;
+    }
+
+    @Override
+    public StoredObjectInventory inventory(String prefix, int limit) {
+        Path base = resolve(prefix);
+        if (!Files.exists(base)) return new StoredObjectInventory(List.of(), false);
+        int safeLimit = Math.max(1, limit);
+        List<StoredObjectInventoryItem> items = new ArrayList<>();
+        try (var paths = Files.walk(base)) {
+            var iterator = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)).iterator();
+            while (iterator.hasNext() && items.size() <= safeLimit) {
+                Path path = iterator.next();
+                String key = root.relativize(path).toString().replace('\\', '/');
+                Instant modified = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant();
+                items.add(new StoredObjectInventoryItem(key, Files.size(path), modified,
+                        null, null, true, false));
+            }
+        } catch (IOException ex) {
+            throw new AttachmentStorageException("本地附件对象巡检失败", ex);
+        }
+        boolean truncated = items.size() > safeLimit;
+        if (truncated) items = new ArrayList<>(items.subList(0, safeLimit));
+        return new StoredObjectInventory(items, truncated);
     }
 
     private Path resolve(String key) {
@@ -124,6 +157,20 @@ public class LocalAttachmentObjectStore implements AttachmentObjectStore {
     private String sha256(byte[] content) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("当前 JVM 不支持 SHA-256", ex);
+        }
+    }
+
+    private String sha256(Path path) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = input.read(buffer)) >= 0) digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("当前 JVM 不支持 SHA-256", ex);
         }

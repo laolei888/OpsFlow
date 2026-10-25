@@ -2,6 +2,7 @@ package com.opsflow.attachment;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -32,6 +33,8 @@ public class AttachmentStorageProperties {
     private final S3 s3 = new S3();
     @Valid
     private final Multipart multipart = new Multipart();
+    @Valid
+    private final Governance governance = new Governance();
 
     @Getter
     @Setter
@@ -48,6 +51,7 @@ public class AttachmentStorageProperties {
         private boolean pathStyleAccess = true;
         private boolean autoCreateBucket = true;
         private boolean autoConfigureCors;
+        private boolean autoConfigureVersioning;
         private List<String> corsAllowedOrigins = new ArrayList<>();
     }
 
@@ -65,5 +69,20 @@ public class AttachmentStorageProperties {
         private Duration sessionTtl = Duration.ofHours(24);
         @Min(1)
         private int completedRetentionDays = 7;
+    }
+
+    @Getter
+    @Setter
+    public static class Governance {
+        private boolean enabled = true;
+        @Min(1)
+        private long defaultQuotaBytes = 10L * 1024 * 1024 * 1024;
+        @Min(1)
+        @Max(100)
+        private int defaultWarningPercent = 80;
+        @NotNull
+        private Duration orphanGracePeriod = Duration.ofHours(24);
+        @Min(100)
+        private int maxObjectsPerScan = 10_000;
     }
 }

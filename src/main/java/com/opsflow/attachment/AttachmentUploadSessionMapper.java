@@ -11,4 +11,18 @@ public interface AttachmentUploadSessionMapper extends BaseMapper<AttachmentUplo
             "WHERE session_key = #{sessionKey} AND tenant_id = #{tenantId} FOR UPDATE")
     AttachmentUploadSession selectForUpdate(@Param("sessionKey") String sessionKey,
                                             @Param("tenantId") Long tenantId);
+
+    @Select("""
+            SELECT COALESCE(SUM(size_bytes), 0) FROM attachment_upload_sessions
+            WHERE tenant_id = #{tenantId}
+              AND status IN ('INITIATED', 'COMPLETING', 'ABORTING', 'EXPIRING', 'FAILED')
+            """)
+    long sumReservedSizeByTenant(@Param("tenantId") Long tenantId);
+
+    @Select("""
+            SELECT COUNT(*) FROM attachment_upload_sessions
+            WHERE tenant_id = #{tenantId}
+              AND status IN ('INITIATED', 'COMPLETING', 'ABORTING', 'EXPIRING', 'FAILED')
+            """)
+    long countActiveByTenant(@Param("tenantId") Long tenantId);
 }

@@ -17,11 +17,26 @@ public interface AttachmentObjectStore {
 
     MaterializedAttachment materialize(String key);
 
-    void move(String sourceKey, String targetKey);
+    StoredAttachmentObject move(String sourceKey, String targetKey);
 
     void delete(String key);
 
     boolean exists(String key);
+
+    default boolean supportsInventory() {
+        return false;
+    }
+
+    default StoredObjectInventory inventory(String prefix, int limit) {
+        throw new AttachmentStorageException("当前附件存储后端不支持对象巡检");
+    }
+
+    default void deleteVersion(String key, String versionId) {
+        if (versionId != null && !versionId.isBlank()) {
+            throw new AttachmentStorageException("当前附件存储后端不支持对象版本删除");
+        }
+        delete(key);
+    }
 
     default boolean supportsMultipartUpload() {
         return false;

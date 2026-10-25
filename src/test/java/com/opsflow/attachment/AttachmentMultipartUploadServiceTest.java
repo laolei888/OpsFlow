@@ -40,6 +40,7 @@ class AttachmentMultipartUploadServiceTest {
     @Mock private TicketService ticketService;
     @Mock private AuditLogService auditLogService;
     @Mock private AttachmentStorageService storageService;
+    @Mock private AttachmentStorageQuotaService quotaService;
     @Mock private TransactionTemplate transactionTemplate;
 
     private AttachmentMultipartUploadService service;
@@ -57,7 +58,7 @@ class AttachmentMultipartUploadServiceTest {
         lenient().when(storageService.multipartCapabilities()).thenReturn(capabilities());
         lenient().when(storageService.configuredType()).thenReturn(AttachmentStorageType.S3);
         service = new AttachmentMultipartUploadService(sessionMapper, attachmentMapper, ticketService,
-                auditLogService, storageService, transactionTemplate);
+                auditLogService, storageService, quotaService, transactionTemplate);
     }
 
     @Test
@@ -76,6 +77,7 @@ class AttachmentMultipartUploadServiceTest {
         assertEquals(2, result.totalParts());
         assertEquals(8L * 1024 * 1024, result.partSize());
         verify(storageService).createMultipartUpload(anyString(), eq("text/plain"), anyMap());
+        verify(quotaService).assertCanStore(1L, 12L * 1024 * 1024);
         verify(ticketService).getVisible(9L, 1L, 7L);
     }
 

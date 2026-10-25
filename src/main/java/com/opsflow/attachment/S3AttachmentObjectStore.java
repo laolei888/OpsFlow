@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.CORSConfiguration;
 import software.amazon.awssdk.services.s3.model.CORSRule;
+import software.amazon.awssdk.services.s3.model.BucketVersioningStatus;
 import software.amazon.awssdk.services.s3.model.AbortMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CompletedMultipartUpload;
@@ -27,10 +28,14 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListPartsRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectVersionsRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutBucketCorsRequest;
+import software.amazon.awssdk.services.s3.model.PutBucketVersioningRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.UploadPartRequest;
+import software.amazon.awssdk.services.s3.model.VersioningConfiguration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignRequest;
@@ -87,6 +92,7 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
             throw new IllegalStateException("S3 附件桶不可用: " + properties.getBucket(), ex);
         }
         configureCors();
+        configureVersioning();
     }
 
     @Override
@@ -139,13 +145,13 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
     }
 
     @Override
-    public void move(String sourceKey, String targetKey) {
+    public StoredAttachmentObject move(String sourceKey, String targetKey) {
         if (exists(targetKey)) throw new AttachmentStorageException("S3 附件目标对象已存在");
         boolean copied = false;
         try {
             String copySource = URLEncoder.encode(properties.getBucket() + "/" + sourceKey,
                     StandardCharsets.UTF_8).replace("%2F", "/");
-            client.copyObject(CopyObjectRequest.builder()
+            var response = client.copyObject(CopyObjectRequest.builder()
                     .copySource(copySource)
                     .destinationBucket(properties.getBucket())
                     .destinationKey(targetKey)
@@ -153,6 +159,8 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
             copied = true;
             client.deleteObject(DeleteObjectRequest.builder()
                     .bucket(properties.getBucket()).key(sourceKey).build());
+            String etag = response.copyObjectResult() == null ? null : response.copyObjectResult().eTag();
+            return new StoredAttachmentObject(etag, response.versionId());
         } catch (SdkException ex) {
             if (copied) rollbackCopiedTarget(targetKey, ex);
             throw new AttachmentStorageException("S3 附件移动失败", ex);
@@ -179,6 +187,63 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
             throw new AttachmentStorageException("S3 附件状态检查失败", ex);
         } catch (SdkException ex) {
             throw new AttachmentStorageException("S3 附件状态检查失败", ex);
+        }
+    }
+
+    @Override
+    public boolean supportsInventory() {
+        return true;
+    }
+
+    @Override
+    public StoredObjectInventory inventory(String prefix, int limit) {
+        int safeLimit = Math.max(1, limit);
+        try {
+            List<StoredObjectInventoryItem> items = new ArrayList<>();
+            String keyMarker = null;
+            String versionMarker = null;
+            boolean truncated;
+            do {
+                var builder = ListObjectVersionsRequest.builder()
+                        .bucket(properties.getBucket()).prefix(prefix).maxKeys(Math.min(1000, safeLimit + 1));
+                if (keyMarker != null) builder.keyMarker(keyMarker);
+                if (versionMarker != null) builder.versionIdMarker(versionMarker);
+                var response = client.listObjectVersions(builder.build());
+                response.versions().forEach(version -> items.add(new StoredObjectInventoryItem(
+                        version.key(), version.size(), version.lastModified(), version.eTag(),
+                        version.versionId(), Boolean.TRUE.equals(version.isLatest()), false)));
+                response.deleteMarkers().forEach(marker -> items.add(new StoredObjectInventoryItem(
+                        marker.key(), 0, marker.lastModified(), null, marker.versionId(),
+                        Boolean.TRUE.equals(marker.isLatest()), true)));
+                truncated = Boolean.TRUE.equals(response.isTruncated());
+                keyMarker = response.nextKeyMarker();
+                versionMarker = response.nextVersionIdMarker();
+            } while (truncated && items.size() <= safeLimit);
+            items.sort(Comparator.comparing(StoredObjectInventoryItem::key)
+                    .thenComparing(StoredObjectInventoryItem::lastModified,
+                            Comparator.nullsLast(Comparator.reverseOrder())));
+            boolean limited = truncated || items.size() > safeLimit;
+            List<StoredObjectInventoryItem> result = items.size() > safeLimit
+                    ? items.subList(0, safeLimit) : items;
+            return new StoredObjectInventory(result, limited);
+        } catch (S3Exception ex) {
+            if (ex.statusCode() == 405 || ex.statusCode() == 501) {
+                return currentObjectInventory(prefix, safeLimit);
+            }
+            throw new AttachmentStorageException("S3 附件对象巡检失败", ex);
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 附件对象巡检失败", ex);
+        }
+    }
+
+    @Override
+    public void deleteVersion(String key, String versionId) {
+        try {
+            var builder = DeleteObjectRequest.builder().bucket(properties.getBucket()).key(key);
+            if (versionId != null && !versionId.isBlank()) builder.versionId(versionId);
+            client.deleteObject(builder.build());
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 附件对象版本删除失败", ex);
         }
     }
 
@@ -364,6 +429,45 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
             log.info("Configured browser multipart upload CORS for attachment bucket {}", properties.getBucket());
         } catch (SdkException ex) {
             throw new IllegalStateException("无法配置 S3 附件桶跨域规则", ex);
+        }
+    }
+
+    private void configureVersioning() {
+        if (!properties.isAutoConfigureVersioning()) return;
+        try {
+            client.putBucketVersioning(PutBucketVersioningRequest.builder()
+                    .bucket(properties.getBucket())
+                    .versioningConfiguration(VersioningConfiguration.builder()
+                            .status(BucketVersioningStatus.ENABLED).build())
+                    .build());
+            log.info("Enabled object versioning for attachment bucket {}", properties.getBucket());
+        } catch (SdkException ex) {
+            throw new IllegalStateException("无法启用 S3 附件桶版本控制", ex);
+        }
+    }
+
+    private StoredObjectInventory currentObjectInventory(String prefix, int limit) {
+        try {
+            List<StoredObjectInventoryItem> items = new ArrayList<>();
+            String continuationToken = null;
+            boolean truncated;
+            do {
+                var builder = ListObjectsV2Request.builder().bucket(properties.getBucket())
+                        .prefix(prefix).maxKeys(Math.min(1000, limit + 1));
+                if (continuationToken != null) builder.continuationToken(continuationToken);
+                var response = client.listObjectsV2(builder.build());
+                response.contents().forEach(item -> items.add(new StoredObjectInventoryItem(
+                        item.key(), item.size(), item.lastModified(), item.eTag(),
+                        null, true, false)));
+                truncated = Boolean.TRUE.equals(response.isTruncated());
+                continuationToken = response.nextContinuationToken();
+            } while (truncated && items.size() <= limit);
+            boolean limited = truncated || items.size() > limit;
+            List<StoredObjectInventoryItem> result = items.size() > limit
+                    ? items.subList(0, limit) : items;
+            return new StoredObjectInventory(result, limited);
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 附件对象巡检失败", ex);
         }
     }
 }

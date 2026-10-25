@@ -29,6 +29,7 @@ public class TicketAttachmentService {
     private final TicketService ticketService;
     private final AuditLogService auditLogService;
     private final AttachmentStorageService storageService;
+    private final AttachmentStorageQuotaService quotaService;
 
     public List<TicketAttachment> list(Long ticketId, Long tenantId, Long requesterId) {
         ticketService.getVisible(ticketId, tenantId, requesterId);
@@ -51,6 +52,7 @@ public class TicketAttachmentService {
         String extension = AttachmentFilePolicy.extensionOf(originalName);
         byte[] content = readContent(file);
         String verifiedContentType = AttachmentFilePolicy.verifyBytes(content, originalName);
+        quotaService.assertCanStore(tenantId, file.getSize());
 
         String storedName = UUID.randomUUID() + "." + extension;
         String objectKey = relativePath(tenantId, ticketId, "quarantine", storedName);

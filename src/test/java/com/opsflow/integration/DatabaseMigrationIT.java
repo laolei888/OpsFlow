@@ -51,6 +51,8 @@ class DatabaseMigrationIT {
             statement.executeUpdate("DELETE FROM user_permission_overrides");
             statement.executeUpdate("DELETE FROM user_external_identities");
             statement.executeUpdate("DELETE FROM oidc_provider_mappings");
+            statement.executeUpdate("DELETE FROM attachment_storage_findings");
+            statement.executeUpdate("DELETE FROM attachment_storage_policies");
             statement.executeUpdate("DELETE FROM attachment_upload_sessions");
             statement.executeUpdate("DELETE FROM async_dead_letter_messages");
             statement.executeUpdate("DELETE FROM async_message_outbox");
@@ -89,10 +91,10 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV49() throws SQLException {
+    void appliesEveryMigrationThroughV50() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("49", flyway.info().current().getVersion().getVersion());
-        assertEquals(49, flyway.info().applied().length);
+        assertEquals("50", flyway.info().current().getVersion().getVersion());
+        assertEquals(50, flyway.info().applied().length);
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns
@@ -103,6 +105,27 @@ class DatabaseMigrationIT {
              ResultSet result = statement.executeQuery()) {
             result.next();
             assertEquals(7, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = DATABASE()
+                       AND table_name IN ('attachment_storage_policies', 'attachment_storage_findings')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(2, result.getInt(1));
+        }
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'attachment_storage_findings'
+                       AND column_name IN ('finding_fingerprint', 'finding_type', 'object_key',
+                                           'version_id', 'eligible_delete_at', 'last_seen_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(6, result.getInt(1));
         }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""

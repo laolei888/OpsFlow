@@ -82,6 +82,7 @@
 - 扫描中的附件禁止预览和下载，感染与终态失败文件持续保留在隔离区；管理员可查看扫描引擎、结论、哈希、重试次数与积压摘要，填写原因后重新扫描，或输入完整 SHA-256 执行带审计的高风险人工放行
 - 附件存储适配层：本地卷与 S3/MinIO 可配置切换，每条附件固化存储后端、对象键、ETag 与版本号；历史附件继续从原后端读取，新附件按当前策略写入私有桶，扫描通过后从 `quarantine/` 移动到 `clean/`。S3 下载仅在资源级鉴权与扫描状态校验通过后签发默认 5 分钟有效的预签名地址
 - 大文件分片直传与断点续传：超过普通上传阈值的附件由后端创建租户隔离的 S3 Multipart 会话，浏览器使用短时签名地址并发上传分片；重新选择同一文件可查询对象存储中的已完成分片后续传。服务端合并前校验完整分片清单，合并后复核对象大小，再写入附件记录并进入隔离扫描；取消、过期与失败会话由后台任务中止并清理，完成记录按保留期回收
+- 附件存储治理：按租户配置附件总配额与预警阈值，普通上传和分片会话都在事务锁内计算“已使用 + 活动预留”空间，防止并发上传绕过配额；后台定期比对数据库引用与本地/S3 对象清单，识别孤儿对象、非当前版本、删除标记和缺失对象。巡检只生成持久化证据，管理员必须等待观察期、重新校验引用并输入 `DELETE` 与原因后才能逐项清理
 - 容量规划与治理闭环：后台按租户定时采集工单吞吐、SLA 逾期、事件告警、异步消息、附件扫描、存储与 JVM 内存快照；管理员可创建普通快照或关联发布单的长期基线，查看 7-180 天趋势、阈值利用率、线性触顶预测，并逐项比较两个版本的改善与退化；支持租户级八项容量阈值、预警水位和观察周期配置，自动创建/升级/恢复容量预警；维护窗口内保留风险证据但抑制通知，窗口结束后对未确认风险补发提醒，并通过历史风险画像持续统计解决率、平均解决时长与高频风险指标
 - 工单附件上传、列表和删除继续支持租户隔离、文件名清洗、类型与大小限制，并通过文件签名或严格文本解码识别伪装文件；图片预览复用带 JWT 的安全下载链路
 - ADMIN 团队管理：创建账号、启停用、角色调整，并保护最后一名管理员
@@ -132,7 +133,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 259 个业务单元测试，不依赖 Docker
+# 265 个业务单元测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -156,7 +157,7 @@ node quality/observability-smoke.mjs
 docker compose --profile quality run --rm --no-deps k6
 ```
 
-`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V49 的全部 Flyway
+`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V50 的全部 Flyway
 迁移、CSAT 唯一约束和数据库聚合查询。Windows 本地环境若无法访问 Docker 命名管道，
 也可以通过 `OPSFLOW_IT_JDBC_URL`、`OPSFLOW_IT_DB_USERNAME` 和
 `OPSFLOW_IT_DB_PASSWORD` 指向一个独立测试数据库；不要连接生产库。
@@ -294,6 +295,12 @@ curl -X POST -H "Authorization: Bearer <TOKEN>" \
     GET    /api/v1/admin/attachment-security
     GET    /api/v1/admin/attachment-security/summary
     GET    /api/v1/admin/attachment-security/storage
+    GET    /api/v1/admin/attachment-security/governance/summary
+    GET    /api/v1/admin/attachment-security/governance/findings
+    POST   /api/v1/admin/attachment-security/governance/reconcile
+    PUT    /api/v1/admin/attachment-security/governance/policy
+    POST   /api/v1/admin/attachment-security/governance/findings/{id}/delete
+    POST   /api/v1/admin/attachment-security/governance/findings/{id}/ignore
     POST   /api/v1/admin/attachment-security/{id}/retry
     POST   /api/v1/admin/attachment-security/{id}/release
 
@@ -620,10 +627,9 @@ curl http://localhost:8081/actuator/health
 
 ## 后续迭代计划
 
-1. 增加对象版本回收、孤儿对象巡检与存储用量配额
-2. 增加通知模板审批流、多语言模板和发送时间窗
-3. 增加故障演练、恢复时间目标和关键链路混沌测试
-4. 完成最终验收、演示数据、架构材料与简历交付
+1. 增加通知模板审批流、多语言模板和发送时间窗
+2. 增加故障演练、恢复时间目标和关键链路混沌测试
+3. 完成最终验收、演示数据、架构材料与简历交付
 
 通知接口：
 
