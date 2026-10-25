@@ -109,6 +109,31 @@ class AttachmentThreatScannerTest {
         assertEquals(64, result.sha256().length());
     }
 
+    @Test
+    void streamsLargeTextWithoutLoadingWholeFileAndPreservesHash() throws IOException {
+        Path file = tempDir.resolve("large.log");
+        byte[] block = "streamed diagnostic line\n".repeat(4096).getBytes(StandardCharsets.UTF_8);
+        try (var output = Files.newOutputStream(file)) {
+            for (int index = 0; index < 160; index++) output.write(block);
+        }
+
+        AttachmentThreatScanner.ScanResult result = scanner.scan(file, attachment("large.log"));
+
+        assertTrue(Files.size(file) > 10L * 1024 * 1024);
+        assertTrue(result.clean());
+        assertEquals(64, result.sha256().length());
+    }
+
+    @Test
+    void blocksContentWhoseSignatureDoesNotMatchDeclaredExtension() throws IOException {
+        Path file = Files.writeString(tempDir.resolve("fake.pdf"), "this is not a PDF");
+
+        AttachmentThreatScanner.ScanResult result = scanner.scan(file, attachment("fake.pdf"));
+
+        assertFalse(result.clean());
+        assertEquals("CONTENT_TYPE_MISMATCH", result.result());
+    }
+
     private TicketAttachment attachment(String name) {
         TicketAttachment attachment = new TicketAttachment();
         attachment.setOriginalName(name);

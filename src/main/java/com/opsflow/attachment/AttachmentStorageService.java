@@ -29,7 +29,15 @@ public class AttachmentStorageService {
 
     @PostConstruct
     void validateConfiguration() {
-        requireStore(properties.getType());
+        AttachmentObjectStore configured = requireStore(properties.getType());
+        AttachmentStorageProperties.Multipart multipart = properties.getMultipart();
+        if (multipart.isEnabled() && properties.getType() == AttachmentStorageType.S3
+                && !configured.supportsMultipartUpload()) {
+            throw new IllegalStateException("已启用附件分片上传，但当前存储适配器不支持该能力");
+        }
+        if (multipart.getPartSize() > multipart.getMaxFileSize()) {
+            throw new IllegalStateException("附件分片大小不能超过分片上传文件上限");
+        }
     }
 
     public AttachmentStorageType configuredType() {
@@ -38,6 +46,14 @@ public class AttachmentStorageService {
 
     public long maxFileSize() {
         return properties.getMaxFileSize();
+    }
+
+    public MultipartCapabilities multipartCapabilities() {
+        AttachmentStorageProperties.Multipart multipart = properties.getMultipart();
+        AttachmentObjectStore configured = requireStore(configuredType());
+        boolean enabled = multipart.isEnabled() && configured.supportsMultipartUpload();
+        return new MultipartCapabilities(enabled, properties.getMaxFileSize(), multipart.getMaxFileSize(),
+                multipart.getPartSize(), multipart.getSessionTtl(), multipart.getPresignedPartTtl());
     }
 
     public StoredAttachmentObject put(String key, byte[] content, String contentType,
@@ -67,6 +83,49 @@ public class AttachmentStorageService {
 
     public boolean exists(TicketAttachment attachment) {
         return storeFor(attachment).exists(validKey(attachment.getStoragePath()));
+    }
+
+    public boolean exists(AttachmentStorageType type, String key) {
+        return requireStore(type).exists(validKey(key));
+    }
+
+    public void delete(AttachmentStorageType type, String key) {
+        requireStore(type).delete(validKey(key));
+    }
+
+    public MultipartUploadObject createMultipartUpload(String key, String contentType,
+                                                        Map<String, String> metadata) {
+        AttachmentObjectStore store = multipartStore(configuredType());
+        return store.createMultipartUpload(validKey(key), contentType, metadata);
+    }
+
+    public PresignedUploadPart presignUploadPart(AttachmentStorageType type, String key,
+                                                 String uploadId, int partNumber, Duration remainingSessionTtl) {
+        Duration configuredTtl = properties.getMultipart().getPresignedPartTtl();
+        Duration ttl = configuredTtl.compareTo(remainingSessionTtl) > 0 ? remainingSessionTtl : configuredTtl;
+        if (ttl.isNegative() || ttl.isZero()) throw new AttachmentStorageException("分片上传会话已过期");
+        Duration safeTtl = ttl.compareTo(Duration.ofHours(1)) > 0 ? Duration.ofHours(1) : ttl;
+        URI uri = multipartStore(type).presignUploadPart(validKey(key), uploadId, partNumber, safeTtl);
+        return new PresignedUploadPart(uri, Instant.now().plus(safeTtl));
+    }
+
+    public List<MultipartUploadedPart> listMultipartParts(AttachmentStorageType type, String key,
+                                                          String uploadId) {
+        return multipartStore(type).listMultipartParts(validKey(key), uploadId);
+    }
+
+    public StoredAttachmentObject completeMultipartUpload(AttachmentStorageType type, String key,
+                                                           String uploadId,
+                                                           List<CompletedMultipartPart> parts) {
+        return multipartStore(type).completeMultipartUpload(validKey(key), uploadId, parts);
+    }
+
+    public void abortMultipartUpload(AttachmentStorageType type, String key, String uploadId) {
+        multipartStore(type).abortMultipartUpload(validKey(key), uploadId);
+    }
+
+    public StoredObjectMetadata metadata(AttachmentStorageType type, String key) {
+        return requireStore(type).metadata(validKey(key));
     }
 
     public Optional<PresignedObject> presignDownload(TicketAttachment attachment) {
@@ -99,10 +158,23 @@ public class AttachmentStorageService {
         return store;
     }
 
+    private AttachmentObjectStore multipartStore(AttachmentStorageType type) {
+        AttachmentObjectStore store = requireStore(type);
+        if (!store.supportsMultipartUpload()) {
+            throw new AttachmentStorageException("当前附件存储后端不支持分片上传");
+        }
+        return store;
+    }
+
     private String validKey(String value) {
         if (value == null || value.isBlank() || value.startsWith("/") || value.contains("\\")
-                || value.contains("../") || value.equals("..") || value.chars().anyMatch(Character::isISOControl)) {
+                || value.chars().anyMatch(Character::isISOControl)) {
             throw new AttachmentStorageException("附件对象键非法");
+        }
+        for (String segment : value.split("/", -1)) {
+            if (segment.isBlank() || segment.equals(".") || segment.equals("..")) {
+                throw new AttachmentStorageException("附件对象键非法");
+            }
         }
         return value;
     }
@@ -113,4 +185,10 @@ public class AttachmentStorageService {
                                 Duration presignedDownloadTtl) { }
 
     public record PresignedObject(URI uri, Instant expiresAt) { }
+
+    public record PresignedUploadPart(URI uri, Instant expiresAt) { }
+
+    public record MultipartCapabilities(boolean enabled, long simpleUploadMaxBytes,
+                                        long multipartUploadMaxBytes, long partSize,
+                                        Duration sessionTtl, Duration presignedPartTtl) { }
 }

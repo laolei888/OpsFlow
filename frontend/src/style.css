@@ -140,6 +140,15 @@ nav { display: grid; gap: 5px; } nav button { display: flex; align-items: center
 .upload-attachment-button { display: inline-flex; align-items: center; width: fit-content; padding: 8px 11px; border-radius: 8px; color: #657ee7; background: #e9edff; cursor: pointer; font-size: 11px; font-weight: 700; }
 .upload-attachment-button:hover { background: #dfe5ff; }
 .attachment-toolbar > small { color: #a1aaba; font-size: 10px; }
+.attachment-upload-progress { display: grid; gap: 8px; margin: 0 0 12px; padding: 11px 12px; border: 1px solid #dce3ff; border-radius: 9px; background: #f5f7ff; }
+.attachment-upload-progress-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.attachment-upload-progress-header > div { min-width: 0; }
+.attachment-upload-progress-header strong, .attachment-upload-progress-header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-upload-progress-header strong { color: #35415a; font-size: 11px; }
+.attachment-upload-progress-header small, .attachment-upload-progress > small { margin-top: 3px; color: #7f8ca3; font-size: 9px; }
+.attachment-upload-progress-header button { flex: 0 0 auto; padding: 5px 8px; color: #c84d58; background: #fff; border: 1px solid #f0cdd1; font-size: 9px; font-weight: 700; }
+.attachment-upload-progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: #e0e5f4; }
+.attachment-upload-progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #657ee7, #7b9cf2); transition: width .2s ease; }
 .attachment-empty { padding: 14px 0 4px; color: #a0aabb; font-size: 11px; }
 .attachment-list { display: grid; gap: 8px; }
 .attachment-item { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e7ebf2; border-radius: 9px; background: #fff; }

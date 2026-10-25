@@ -9,13 +9,24 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.CopyObjectResponse;
+import software.amazon.awssdk.services.s3.model.AbortMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.AbortMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadResponse;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListPartsRequest;
+import software.amazon.awssdk.services.s3.model.ListPartsResponse;
+import software.amazon.awssdk.services.s3.model.Part;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -60,5 +71,37 @@ class S3AttachmentObjectStoreTest {
         verify(client, times(2)).deleteObject(requests.capture());
         assertEquals(List.of(sourceKey, targetKey),
                 requests.getAllValues().stream().map(DeleteObjectRequest::key).toList());
+    }
+
+    @Test
+    void supportsMultipartLifecycleAndObjectMetadata() {
+        when(client.createMultipartUpload(any(CreateMultipartUploadRequest.class)))
+                .thenReturn(CreateMultipartUploadResponse.builder().uploadId("upload-1").build());
+        when(client.listParts(any(ListPartsRequest.class))).thenReturn(ListPartsResponse.builder()
+                .isTruncated(false)
+                .parts(Part.builder().partNumber(1).eTag("etag-1").size(8L).build(),
+                        Part.builder().partNumber(2).eTag("etag-2").size(3L).build())
+                .build());
+        when(client.completeMultipartUpload(any(CompleteMultipartUploadRequest.class)))
+                .thenReturn(CompleteMultipartUploadResponse.builder().eTag("final-etag").versionId("v1").build());
+        when(client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder().contentLength(11L).eTag("final-etag").versionId("v1").build());
+        when(client.abortMultipartUpload(any(AbortMultipartUploadRequest.class)))
+                .thenReturn(AbortMultipartUploadResponse.builder().build());
+
+        MultipartUploadObject upload = store.createMultipartUpload("quarantine/1/9/file.txt",
+                "text/plain", Map.of("tenant-id", "1"));
+        List<MultipartUploadedPart> parts = store.listMultipartParts(
+                "quarantine/1/9/file.txt", upload.uploadId());
+        StoredAttachmentObject completed = store.completeMultipartUpload("quarantine/1/9/file.txt",
+                upload.uploadId(), parts.stream()
+                        .map(part -> new CompletedMultipartPart(part.partNumber(), part.etag())).toList());
+        StoredObjectMetadata metadata = store.metadata("quarantine/1/9/file.txt");
+        store.abortMultipartUpload("quarantine/1/9/file.txt", upload.uploadId());
+
+        assertEquals("upload-1", upload.uploadId());
+        assertEquals(2, parts.size());
+        assertEquals("v1", completed.versionId());
+        assertEquals(11L, metadata.sizeBytes());
     }
 }

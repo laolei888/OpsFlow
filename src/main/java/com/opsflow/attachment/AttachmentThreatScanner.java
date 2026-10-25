@@ -48,22 +48,19 @@ public class AttachmentThreatScanner {
         if (path == null || !Files.isRegularFile(path) || !Files.isReadable(path)) {
             throw new AttachmentThreatScanException("隔离文件不存在或不可读", true);
         }
-        byte[] content;
+        FileFingerprint fingerprint = fingerprint(path);
+        String sha256 = fingerprint.sha256();
         try {
-            content = Files.readAllBytes(path);
-        } catch (IOException ex) {
-            throw new AttachmentThreatScanException("隔离文件读取失败", ex, true);
-        }
-        String sha256 = sha256(content);
-        try {
-            String binaryText = new String(content, StandardCharsets.ISO_8859_1);
-            if (binaryText.contains(EICAR)) {
+            if (fingerprint.eicar()) {
                 return ScanResult.infected("LOCAL_POLICY", "EICAR_TEST_SIGNATURE", sha256);
             }
-            if (startsWith(content, 0x4d, 0x5a) || startsWith(content, 0x7f, 0x45, 0x4c, 0x46)) {
+            if (fingerprint.executable()) {
                 return ScanResult.infected("LOCAL_POLICY", "EXECUTABLE_BINARY_SIGNATURE", sha256);
             }
             String extension = extensionOf(attachment == null ? null : attachment.getOriginalName());
+            if (attachment != null && !AttachmentFilePolicy.pathMatchesDeclaredType(path, attachment.getOriginalName())) {
+                return ScanResult.infected("LOCAL_POLICY", "CONTENT_TYPE_MISMATCH", sha256);
+            }
             if (Set.of("zip", "docx", "xlsx").contains(extension)) {
                 String archiveThreat = inspectArchive(path, extension);
                 if (archiveThreat != null) return ScanResult.infected("LOCAL_POLICY", archiveThreat, sha256);
@@ -190,11 +187,40 @@ public class AttachmentThreatScanner {
         }
     }
 
-    private String sha256(byte[] content) {
+    private FileFingerprint fingerprint(Path path) {
+        byte[] eicar = EICAR.getBytes(StandardCharsets.ISO_8859_1);
+        byte[] prefix = new byte[4];
+        int prefixLength = 0;
+        int eicarMatch = 0;
+        boolean eicarFound = false;
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[64 * 1024];
+            try (InputStream input = Files.newInputStream(path)) {
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    digest.update(buffer, 0, read);
+                    for (int index = 0; index < read; index++) {
+                        byte current = buffer[index];
+                        if (prefixLength < prefix.length) prefix[prefixLength++] = current;
+                        if (!eicarFound) {
+                            if (current == eicar[eicarMatch]) {
+                                eicarMatch++;
+                                if (eicarMatch == eicar.length) eicarFound = true;
+                            } else {
+                                eicarMatch = current == eicar[0] ? 1 : 0;
+                            }
+                        }
+                    }
+                }
+            }
+            boolean executable = startsWith(prefix, 0x4d, 0x5a)
+                    || startsWith(prefix, 0x7f, 0x45, 0x4c, 0x46);
+            return new FileFingerprint(HexFormat.of().formatHex(digest.digest()), eicarFound, executable);
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("当前 JVM 不支持 SHA-256", ex);
+        } catch (IOException ex) {
+            throw new AttachmentThreatScanException("隔离文件读取失败", ex, true);
         }
     }
 
@@ -227,4 +253,6 @@ public class AttachmentThreatScanner {
             return new ScanResult(false, engine, result, sha256);
         }
     }
+
+    private record FileFingerprint(String sha256, boolean eicar, boolean executable) { }
 }

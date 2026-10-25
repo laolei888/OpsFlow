@@ -13,6 +13,19 @@ OpsFlow 的附件业务通过 `AttachmentObjectStore` 适配层与具体介质�
 
 对象桶必须保持私有。预签名地址默认 5 分钟失效，最长被应用限制为 1 小时；地址只会在租户和工单资源级授权通过后签发。
 
+## 大文件分片直传与断点续传
+
+普通附件仍经过 OpsFlow 后端执行即时文件签名校验。超过普通上传上限后，前端改用 S3 Multipart Upload：
+
+1. `POST /api/v1/tickets/{ticketId}/attachments/uploads` 创建上传会话。服务端校验工单可见范围、文件名、扩展名、声明大小和 S3 能力，并把 provider upload ID 仅保存在数据库。
+2. 前端按默认 8 MiB 切片，逐片请求短时 `UploadPart` 签名地址，最多并发上传 3 片；对象键始终位于当前租户和工单的 `quarantine/` 前缀。
+3. 浏览器只保存会话 ID 和文件指纹。网络中断后重新选择同一文件，系统通过 `ListParts` 获取已经成功落盘的分片，只上传缺失部分。
+4. 完成时前端提交完整的分片编号和 ETag。服务端调用 S3 合并后再次读取对象元数据，实际大小必须与会话声明完全一致，随后才创建 `PENDING` 附件记录。
+5. 安全任务以流式方式计算 SHA-256、识别 EICAR/可执行文件和实际内容签名，避免大文件整体进入 JVM 堆；通过检查后才从 `quarantine/` 移动至 `clean/`。
+6. 用户取消会中止 Multipart Upload；默认 24 小时未完成的会话由后台任务清理，已结束会话记录默认保留 7 天用于幂等和排障。
+
+默认上限为 1 GiB，分片签名 15 分钟有效。S3 单分片除最后一片外不得小于 5 MiB，配置校验会阻止不合法的分片大小。浏览器直传需要对象桶允许 OpsFlow 页面来源执行 `PUT`；本地 RustFS profile 会自动配置 `http://localhost:8081`，托管 S3 建议由基础设施代码显式管理 CORS，并保持应用侧自动配置关闭。
+
 ## 本地 S3 演示
 
 仓库的开发 profile 使用 RustFS 1.0.3 提供本地 S3 兼容端点。OpsFlow 只依赖标准 S3 API，连接已有 MinIO、Amazon S3 或其他兼容服务时不需要修改业务代码。
@@ -30,6 +43,13 @@ OPSFLOW_STORAGE_S3_SECRET_KEY=change-this-object-storage-password
 OPSFLOW_STORAGE_S3_BUCKET=opsflow-attachments
 OPSFLOW_STORAGE_S3_PATH_STYLE=true
 OPSFLOW_STORAGE_S3_AUTO_CREATE_BUCKET=true
+OPSFLOW_STORAGE_S3_AUTO_CONFIGURE_CORS=true
+OPSFLOW_STORAGE_S3_CORS_ALLOWED_ORIGINS=http://localhost:8081
+OPSFLOW_STORAGE_MULTIPART_ENABLED=true
+OPSFLOW_STORAGE_MULTIPART_PART_SIZE=8388608
+OPSFLOW_STORAGE_MULTIPART_MAX_FILE_SIZE=1073741824
+OPSFLOW_STORAGE_MULTIPART_PRESIGNED_TTL=PT15M
+OPSFLOW_STORAGE_MULTIPART_SESSION_TTL=PT24H
 ```
 
 然后启动对象存储 profile：
@@ -51,6 +71,10 @@ OPSFLOW_STORAGE_S3_REGION=ap-southeast-1
 OPSFLOW_STORAGE_S3_BUCKET=company-opsflow-attachments
 OPSFLOW_STORAGE_S3_PATH_STYLE=false
 OPSFLOW_STORAGE_S3_AUTO_CREATE_BUCKET=false
+OPSFLOW_STORAGE_S3_AUTO_CONFIGURE_CORS=false
+OPSFLOW_STORAGE_MULTIPART_ENABLED=true
+OPSFLOW_STORAGE_MULTIPART_PART_SIZE=8388608
+OPSFLOW_STORAGE_MULTIPART_MAX_FILE_SIZE=1073741824
 ```
 
 AWS 环境可不填写静态密钥，改用实例、容器或工作负载身份；其他 S3 兼容服务可额外配置内部 `OPSFLOW_STORAGE_S3_ENDPOINT` 和浏览器可访问的 `OPSFLOW_STORAGE_S3_PUBLIC_ENDPOINT`。两个静态密钥必须同时设置，且只允许通过部署密钥系统注入。
@@ -60,6 +84,7 @@ AWS 环境可不填写静态密钥，改用实例、容器或工作负载身份�
 ## 运维验证
 
 - `GET /api/v1/admin/attachment-security/storage` 查看当前后端、可用适配器、桶名和预签名有效期。
+- `GET /api/v1/tickets/{ticketId}/attachments/upload-capabilities` 查看普通上传上限、分片上限、分片大小与会话有效期。
 - 上传测试附件后确认数据库 `storage_backend` 为 `S3`，并观察对象从 `quarantine/` 移动到 `clean/`。
 - 复制预签名地址时不得写入工单评论、日志或监控标签；该地址虽然短时有效，但在失效前等同于临时凭据。
 - 切换后端前先备份数据库、本地附件卷和对象桶，并分别执行恢复演练。

@@ -51,6 +51,7 @@ class DatabaseMigrationIT {
             statement.executeUpdate("DELETE FROM user_permission_overrides");
             statement.executeUpdate("DELETE FROM user_external_identities");
             statement.executeUpdate("DELETE FROM oidc_provider_mappings");
+            statement.executeUpdate("DELETE FROM attachment_upload_sessions");
             statement.executeUpdate("DELETE FROM async_dead_letter_messages");
             statement.executeUpdate("DELETE FROM async_message_outbox");
         }
@@ -88,10 +89,21 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV48() throws SQLException {
+    void appliesEveryMigrationThroughV49() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("48", flyway.info().current().getVersion().getVersion());
-        assertEquals(48, flyway.info().applied().length);
+        assertEquals("49", flyway.info().current().getVersion().getVersion());
+        assertEquals(49, flyway.info().applied().length);
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'attachment_upload_sessions'
+                       AND column_name IN ('session_key', 'client_upload_id', 'provider_upload_id',
+                                           'status', 'part_size', 'total_parts', 'expires_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(7, result.getInt(1));
+        }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.tables

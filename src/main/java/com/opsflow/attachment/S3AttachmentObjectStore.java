@@ -13,16 +13,27 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
+import software.amazon.awssdk.services.s3.model.CORSConfiguration;
+import software.amazon.awssdk.services.s3.model.CORSRule;
+import software.amazon.awssdk.services.s3.model.AbortMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CompletedMultipartUpload;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.ListPartsRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutBucketCorsRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.services.s3.model.UploadPartRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignRequest;
 
 import java.io.IOException;
 import java.net.URI;
@@ -31,6 +42,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -72,6 +86,7 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
         } catch (SdkException ex) {
             throw new IllegalStateException("S3 附件桶不可用: " + properties.getBucket(), ex);
         }
+        configureCors();
     }
 
     @Override
@@ -168,6 +183,119 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
     }
 
     @Override
+    public boolean supportsMultipartUpload() {
+        return true;
+    }
+
+    @Override
+    public MultipartUploadObject createMultipartUpload(String key, String contentType,
+                                                        Map<String, String> metadata) {
+        try {
+            var response = client.createMultipartUpload(CreateMultipartUploadRequest.builder()
+                    .bucket(properties.getBucket())
+                    .key(key)
+                    .contentType(contentType)
+                    .metadata(metadata)
+                    .build());
+            return new MultipartUploadObject(response.uploadId());
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 分片上传初始化失败", ex);
+        }
+    }
+
+    @Override
+    public URI presignUploadPart(String key, String uploadId, int partNumber, Duration ttl) {
+        try {
+            UploadPartRequest request = UploadPartRequest.builder()
+                    .bucket(properties.getBucket())
+                    .key(key)
+                    .uploadId(uploadId)
+                    .partNumber(partNumber)
+                    .build();
+            var signed = presigner.presignUploadPart(UploadPartPresignRequest.builder()
+                    .signatureDuration(ttl)
+                    .uploadPartRequest(request)
+                    .build());
+            return signed.url().toURI();
+        } catch (Exception ex) {
+            throw new AttachmentStorageException("S3 分片上传地址生成失败", ex);
+        }
+    }
+
+    @Override
+    public List<MultipartUploadedPart> listMultipartParts(String key, String uploadId) {
+        try {
+            List<MultipartUploadedPart> parts = new ArrayList<>();
+            Integer marker = null;
+            boolean truncated;
+            do {
+                var builder = ListPartsRequest.builder()
+                        .bucket(properties.getBucket())
+                        .key(key)
+                        .uploadId(uploadId);
+                if (marker != null) builder.partNumberMarker(marker);
+                var response = client.listParts(builder.build());
+                response.parts().forEach(part -> parts.add(new MultipartUploadedPart(
+                        part.partNumber(), part.eTag(), part.size())));
+                truncated = Boolean.TRUE.equals(response.isTruncated());
+                marker = response.nextPartNumberMarker();
+            } while (truncated);
+            return parts.stream().sorted(Comparator.comparingInt(MultipartUploadedPart::partNumber)).toList();
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 已上传分片查询失败", ex);
+        }
+    }
+
+    @Override
+    public StoredAttachmentObject completeMultipartUpload(String key, String uploadId,
+                                                           List<CompletedMultipartPart> parts) {
+        try {
+            List<CompletedPart> completed = parts.stream()
+                    .sorted(Comparator.comparingInt(CompletedMultipartPart::partNumber))
+                    .map(part -> CompletedPart.builder()
+                            .partNumber(part.partNumber())
+                            .eTag(part.etag())
+                            .build())
+                    .toList();
+            var response = client.completeMultipartUpload(CompleteMultipartUploadRequest.builder()
+                    .bucket(properties.getBucket())
+                    .key(key)
+                    .uploadId(uploadId)
+                    .multipartUpload(CompletedMultipartUpload.builder().parts(completed).build())
+                    .build());
+            return new StoredAttachmentObject(response.eTag(), response.versionId());
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 分片上传合并失败", ex);
+        }
+    }
+
+    @Override
+    public void abortMultipartUpload(String key, String uploadId) {
+        try {
+            client.abortMultipartUpload(AbortMultipartUploadRequest.builder()
+                    .bucket(properties.getBucket())
+                    .key(key)
+                    .uploadId(uploadId)
+                    .build());
+        } catch (S3Exception ex) {
+            if (ex.statusCode() != 404) throw new AttachmentStorageException("S3 分片上传中止失败", ex);
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 分片上传中止失败", ex);
+        }
+    }
+
+    @Override
+    public StoredObjectMetadata metadata(String key) {
+        try {
+            var response = client.headObject(HeadObjectRequest.builder()
+                    .bucket(properties.getBucket()).key(key).build());
+            return new StoredObjectMetadata(response.contentLength(), response.eTag(), response.versionId());
+        } catch (SdkException ex) {
+            throw new AttachmentStorageException("S3 附件元数据查询失败", ex);
+        }
+    }
+
+    @Override
     public Optional<URI> presignDownload(String key, String filename, String contentType, Duration ttl) {
         try {
             GetObjectRequest request = GetObjectRequest.builder()
@@ -208,6 +336,34 @@ public class S3AttachmentObjectStore implements AttachmentObjectStore {
         } catch (SdkException rollbackFailure) {
             originalFailure.addSuppressed(rollbackFailure);
             log.error("Failed to roll back copied S3 attachment object {}", targetKey, rollbackFailure);
+        }
+    }
+
+    private void configureCors() {
+        if (!properties.isAutoConfigureCors()) return;
+        List<String> origins = properties.getCorsAllowedOrigins().stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (origins.isEmpty()) {
+            throw new IllegalStateException("启用 S3 CORS 自动配置时必须提供允许的来源");
+        }
+        try {
+            CORSRule rule = CORSRule.builder()
+                    .allowedMethods("PUT")
+                    .allowedOrigins(origins)
+                    .allowedHeaders("*")
+                    .exposeHeaders("ETag", "x-amz-request-id")
+                    .maxAgeSeconds(3600)
+                    .build();
+            client.putBucketCors(PutBucketCorsRequest.builder()
+                    .bucket(properties.getBucket())
+                    .corsConfiguration(CORSConfiguration.builder().corsRules(rule).build())
+                    .build());
+            log.info("Configured browser multipart upload CORS for attachment bucket {}", properties.getBucket());
+        } catch (SdkException ex) {
+            throw new IllegalStateException("无法配置 S3 附件桶跨域规则", ex);
         }
     }
 }

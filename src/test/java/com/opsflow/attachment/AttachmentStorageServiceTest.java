@@ -38,6 +38,7 @@ class AttachmentStorageServiceTest {
         properties.getS3().setBucket("opsflow-test");
         when(localStore.type()).thenReturn(AttachmentStorageType.LOCAL);
         when(s3Store.type()).thenReturn(AttachmentStorageType.S3);
+        when(s3Store.supportsMultipartUpload()).thenReturn(true);
         storageService = new AttachmentStorageService(properties, List.of(localStore, s3Store));
         storageService.validateConfiguration();
     }

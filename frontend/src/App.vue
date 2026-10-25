@@ -72,6 +72,28 @@ const loadingDetail = ref(false)
 const editingTicket = ref(null)
 const savingTicketEdit = ref(false)
 const uploadingAttachment = ref(false)
+const attachmentUploadCapabilities = ref({
+  enabled: false,
+  simpleUploadMaxBytes: 10 * 1024 * 1024,
+  multipartUploadMaxBytes: 10 * 1024 * 1024,
+  partSize: 8 * 1024 * 1024
+})
+const attachmentUploadProgress = reactive({
+  active: false,
+  sessionKey: '',
+  ticketId: null,
+  fileName: '',
+  percent: 0,
+  uploadedParts: 0,
+  totalParts: 0,
+  statusText: ''
+})
+let activeAttachmentUploadController = null
+let attachmentUploadCancelRequested = false
+const ATTACHMENT_UPLOAD_RESUME_KEY = 'opsflow_attachment_upload_resume'
+const attachmentUploadHint = computed(() => attachmentUploadCapabilities.value.enabled
+  ? `小文件经后端校验；大文件自动分片直传，单个不超过 ${formatFileSize(attachmentUploadCapabilities.value.multipartUploadMaxBytes)}`
+  : `支持图片、文档、表格和压缩包，单个不超过 ${formatFileSize(attachmentUploadCapabilities.value.simpleUploadMaxBytes)}`)
 const ticketFilter = ref('')
 const ticketKeyword = ref('')
 const ticketPriority = ref('')
@@ -1731,18 +1753,25 @@ async function openTicket(ticket) {
     const recommendationQuery = ticket.category
       ? 'category=' + encodeURIComponent(ticket.category)
       : 'keyword=' + encodeURIComponent(ticket.title || '')
-    const [comments, logs, attachments, recommended, assetLinks] = await Promise.all([
+    const [comments, logs, attachments, recommended, assetLinks, uploadCapabilities] = await Promise.all([
       api('/api/v1/tickets/' + ticket.id + '/comments'),
       api('/api/v1/tickets/' + ticket.id + '/audit-logs'),
       api('/api/v1/tickets/' + ticket.id + '/attachments'),
       api('/api/v1/knowledge/articles?page=1&size=3&' + recommendationQuery),
-      api('/api/v1/cmdb/tickets/' + ticket.id + '/assets')
+      api('/api/v1/cmdb/tickets/' + ticket.id + '/assets'),
+      api('/api/v1/tickets/' + ticket.id + '/attachments/upload-capabilities').catch(() => null)
     ])
     ticketComments.value = comments || []
     ticketAuditLogs.value = logs || []
     ticketAttachments.value = attachments || []
     recommendedArticles.value = recommended?.records || []
     ticketAssetLinks.value = assetLinks || []
+    attachmentUploadCapabilities.value = uploadCapabilities || {
+      enabled: false,
+      simpleUploadMaxBytes: 10 * 1024 * 1024,
+      multipartUploadMaxBytes: 10 * 1024 * 1024,
+      partSize: 8 * 1024 * 1024
+    }
     ticketAssetSelection.value = ''
   } catch (err) { error.value = err.message }
   finally { loadingDetail.value = false }
@@ -1864,18 +1893,207 @@ async function uploadAttachment(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file || !selectedTicket.value) return
+  const ticketId = selectedTicket.value.id
   uploadingAttachment.value = true
   try {
+    const capabilities = attachmentUploadCapabilities.value
+    if (file.size > capabilities.simpleUploadMaxBytes) {
+      if (!capabilities.enabled) throw new Error('当前存储模式未启用大文件分片上传')
+      if (file.size > capabilities.multipartUploadMaxBytes) {
+        throw new Error(`附件不能超过 ${formatFileSize(capabilities.multipartUploadMaxBytes)}`)
+      }
+      await uploadMultipartAttachment(ticketId, file)
+      if (selectedTicket.value?.id === ticketId) await refreshTicketAttachments()
+      notify('大文件已合并，正在隔离区执行安全扫描')
+      return
+    }
     const formData = new FormData()
     formData.append('file', file)
-    await api('/api/v1/tickets/' + selectedTicket.value.id + '/attachments', {
+    await api('/api/v1/tickets/' + ticketId + '/attachments', {
       method: 'POST',
       body: formData
     })
-    await refreshTicketAttachments()
+    if (selectedTicket.value?.id === ticketId) await refreshTicketAttachments()
     notify('附件已上传，正在隔离区执行安全扫描')
-  } catch (err) { error.value = err.message }
-  finally { uploadingAttachment.value = false }
+  } catch (err) {
+    if (!attachmentUploadCancelRequested) error.value = err.name === 'AbortError' ? '上传已取消' : err.message
+  } finally {
+    uploadingAttachment.value = false
+    activeAttachmentUploadController = null
+    if (!attachmentUploadCancelRequested) resetAttachmentUploadProgress()
+    attachmentUploadCancelRequested = false
+  }
+}
+
+async function uploadMultipartAttachment(ticketId, file) {
+  attachmentUploadCancelRequested = false
+  activeAttachmentUploadController = new AbortController()
+  let session = await resumeOrCreateUploadSession(ticketId, file)
+  if (session.status === 'COMPLETED') {
+    clearAttachmentResume()
+    return
+  }
+  if (session.status === 'COMPLETING') {
+    await api(`/api/v1/tickets/${ticketId}/attachments/uploads/${session.sessionKey}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({
+        parts: (session.parts || []).map(part => ({ partNumber: part.partNumber, etag: part.etag }))
+      })
+    })
+    clearAttachmentResume()
+    return
+  }
+  if (session.status !== 'INITIATED') throw new Error('已有上传会话不能继续，请重新选择文件')
+
+  Object.assign(attachmentUploadProgress, {
+    active: true,
+    sessionKey: session.sessionKey,
+    ticketId,
+    fileName: file.name,
+    percent: Math.floor((session.uploadedBytes || 0) * 100 / file.size),
+    uploadedParts: session.parts?.length || 0,
+    totalParts: session.totalParts,
+    statusText: session.parts?.length ? '正在续传剩余分片' : '正在上传分片'
+  })
+  saveAttachmentResume(ticketId, file, session.sessionKey)
+  const uploaded = new Set((session.parts || []).map(part => part.partNumber))
+  const missing = []
+  for (let partNumber = 1; partNumber <= session.totalParts; partNumber++) {
+    if (!uploaded.has(partNumber)) missing.push(partNumber)
+  }
+  let cursor = 0
+  let uploadedBytes = session.uploadedBytes || 0
+  const worker = async () => {
+    while (cursor < missing.length && !attachmentUploadCancelRequested) {
+      const partNumber = missing[cursor++]
+      const start = (partNumber - 1) * session.partSize
+      const end = Math.min(file.size, start + session.partSize)
+      const blob = file.slice(start, end)
+      await uploadAttachmentPart(ticketId, session.sessionKey, partNumber, blob)
+      uploadedBytes += blob.size
+      attachmentUploadProgress.uploadedParts++
+      attachmentUploadProgress.percent = Math.min(99, Math.floor(uploadedBytes * 100 / file.size))
+    }
+  }
+  const workers = Math.min(3, Math.max(1, missing.length))
+  try {
+    await Promise.all(Array.from({ length: workers }, () => worker()))
+  } catch (err) {
+    activeAttachmentUploadController?.abort()
+    throw err
+  }
+  if (attachmentUploadCancelRequested) throw new DOMException('upload aborted', 'AbortError')
+
+  attachmentUploadProgress.statusText = '正在核对分片并合并对象'
+  session = await api(`/api/v1/tickets/${ticketId}/attachments/uploads/${session.sessionKey}`)
+  if ((session.parts || []).length !== session.totalParts) throw new Error('对象存储返回的分片数量不完整，请重试续传')
+  await api(`/api/v1/tickets/${ticketId}/attachments/uploads/${session.sessionKey}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({
+      parts: session.parts.map(part => ({ partNumber: part.partNumber, etag: part.etag }))
+    })
+  })
+  attachmentUploadProgress.percent = 100
+  attachmentUploadProgress.statusText = '合并完成，等待安全扫描'
+  clearAttachmentResume()
+}
+
+async function uploadAttachmentPart(ticketId, sessionKey, partNumber, blob) {
+  let lastError
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attachmentUploadCancelRequested) throw new DOMException('upload aborted', 'AbortError')
+    try {
+      const access = await api(`/api/v1/tickets/${ticketId}/attachments/uploads/${sessionKey}/parts/${partNumber}/url`, {
+        method: 'POST'
+      })
+      const response = await fetch(access.url, {
+        method: 'PUT',
+        body: blob,
+        signal: activeAttachmentUploadController?.signal
+      })
+      if (!response.ok) throw new Error(`分片 ${partNumber} 上传失败（HTTP ${response.status}）`)
+      return
+    } catch (err) {
+      if (err.name === 'AbortError') throw err
+      lastError = err
+      if (attempt < 2) await new Promise(resolve => window.setTimeout(resolve, 400 * (2 ** attempt)))
+    }
+  }
+  throw lastError || new Error(`分片 ${partNumber} 上传失败`)
+}
+
+async function resumeOrCreateUploadSession(ticketId, file) {
+  const saved = readAttachmentResume()
+  if (saved && saved.ticketId === ticketId && saved.fileName === file.name
+      && saved.sizeBytes === file.size && saved.lastModified === file.lastModified) {
+    try {
+      const existing = await api(`/api/v1/tickets/${ticketId}/attachments/uploads/${saved.sessionKey}`)
+      if (['INITIATED', 'COMPLETING', 'COMPLETED'].includes(existing.status)) return existing
+    } catch (_) {
+      clearAttachmentResume()
+    }
+  }
+  clearAttachmentResume()
+  const clientUploadId = createClientUploadId()
+  const session = await api(`/api/v1/tickets/${ticketId}/attachments/uploads`, {
+    method: 'POST',
+    body: JSON.stringify({ clientUploadId, originalName: file.name, sizeBytes: file.size })
+  })
+  saveAttachmentResume(ticketId, file, session.sessionKey)
+  return session
+}
+
+async function cancelAttachmentUpload() {
+  if (!attachmentUploadProgress.active || !attachmentUploadProgress.sessionKey) return
+  attachmentUploadCancelRequested = true
+  activeAttachmentUploadController?.abort()
+  const { ticketId, sessionKey } = attachmentUploadProgress
+  try {
+    await api(`/api/v1/tickets/${ticketId}/attachments/uploads/${sessionKey}`, { method: 'DELETE' })
+    notify('大文件上传已取消，临时分片已清理')
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    clearAttachmentResume()
+    resetAttachmentUploadProgress()
+  }
+}
+
+function createClientUploadId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID()
+  return `upload_${Date.now()}_${Math.random().toString(36).slice(2, 18)}`
+}
+
+function saveAttachmentResume(ticketId, file, sessionKey) {
+  localStorage.setItem(ATTACHMENT_UPLOAD_RESUME_KEY, JSON.stringify({
+    ticketId,
+    sessionKey,
+    fileName: file.name,
+    sizeBytes: file.size,
+    lastModified: file.lastModified
+  }))
+}
+
+function readAttachmentResume() {
+  try { return JSON.parse(localStorage.getItem(ATTACHMENT_UPLOAD_RESUME_KEY) || 'null') }
+  catch (_) { return null }
+}
+
+function clearAttachmentResume() {
+  localStorage.removeItem(ATTACHMENT_UPLOAD_RESUME_KEY)
+}
+
+function resetAttachmentUploadProgress() {
+  Object.assign(attachmentUploadProgress, {
+    active: false,
+    sessionKey: '',
+    ticketId: null,
+    fileName: '',
+    percent: 0,
+    uploadedParts: 0,
+    totalParts: 0,
+    statusText: ''
+  })
 }
 
 async function downloadAttachment(attachment) {
@@ -2896,7 +3114,7 @@ onMounted(async () => {
     <p v-if="!exportFields.length" class="export-empty-hint">至少选择一项字段后才能导出。</p>
     <div class="modal-actions"><button type="button" class="secondary-button" @click="showExportModal = false">取消</button><button class="primary-button" :disabled="!selectedTicketIds.length || !exportFields.length || exportingTickets">{{ exportingTickets ? '导出中…' : '导出已选工单' }}</button></div>
   </form>
-</div><div v-if="showDetail" class="modal-backdrop" @click.self="closeTicket"><div class="modal-card detail-modal"><div class="modal-header"><div><p class="eyebrow">TICKET COLLABORATION</p><h2>{{ selectedTicket?.title }}</h2><small class="detail-ticket-no">{{ selectedTicket?.ticketNo }} · {{ statusLabels[selectedTicket?.status] || selectedTicket?.status }}</small></div><div class="detail-header-actions"><button v-if="canBulkUpdate" type="button" class="text-button detail-edit-button" @click="openEditTicketModal">编辑工单</button><button type="button" class="close-button" @click="closeTicket">×</button></div></div><div v-if="loadingDetail" class="empty-state">正在加载工单时间线…</div><template v-else><div class="detail-summary"><div><span>分类</span><strong>{{ selectedTicket?.category || '未分类' }}</strong></div><div><span>优先级</span><strong>{{ priorityLabels[selectedTicket?.priority] || selectedTicket?.priority }}</strong></div><div><span>处理人</span><strong>{{ assigneeName(selectedTicket) }}</strong></div><div><span>创建时间</span><strong>{{ formatDate(selectedTicket?.createdAt) }}</strong></div><div><span>SLA 截止</span><strong>{{ formatDate(selectedTicket?.dueAt) }} · {{ isOverdue(selectedTicket) ? "已逾期" : "按时" }}</strong></div></div><section class="ticket-assets-section"><div class="detail-section-heading"><h3>关联配置项</h3><span>{{ ticketAssetLinks.length }} 项</span></div><div v-if="!ticketAssetLinks.length" class="cmdb-empty-note">该工单还没有关联服务器、应用或业务服务。</div><div v-else class="ticket-asset-list"><div v-for="link in ticketAssetLinks" :key="link.assetId" class="ticket-asset-row"><div><strong>{{ link.asset?.name }}</strong><small>{{ link.asset?.assetNo }} · {{ assetTypeLabel(link.asset?.assetType) }} · {{ linkTypeLabel(link.linkType) }}</small><small v-if="link.note">{{ link.note }}</small></div><button v-if="canBulkUpdate" type="button" class="row-action danger" @click="unlinkTicketAsset(link)">解除</button></div></div><div v-if="canBulkUpdate && availableTicketAssets.length" class="ticket-asset-linker"><select v-model="ticketAssetSelection" aria-label="选择配置项"><option value="">选择要关联的配置项</option><option v-for="asset in availableTicketAssets" :key="asset.id" :value="asset.id">{{ asset.assetNo }} · {{ asset.name }}</option></select><button type="button" class="secondary-button" :disabled="!ticketAssetSelection || linkingTicketAsset" @click="linkSelectedTicketAsset">{{ linkingTicketAsset ? '关联中…' : '关联配置项' }}</button></div><small v-else-if="canBulkUpdate" class="cmdb-link-hint">当前没有可关联的运行中配置项，请先到资产 CMDB 登记资产。</small></section><section class="attachments-section"><div class="detail-section-heading"><h3>附件</h3><span>{{ ticketAttachments.length }} 个文件</span></div><div class="attachment-toolbar"><label class="upload-attachment-button">{{ uploadingAttachment ? '上传中…' : '＋ 上传附件' }}<input type="file" hidden :disabled="uploadingAttachment" @change="uploadAttachment" accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.md,.csv,.doc,.docx,.xls,.xlsx,.zip,.log" /></label><small>支持图片、文档、表格和压缩包，单个不超过 10MB</small></div><div v-if="!ticketAttachments.length" class="attachment-empty">暂无附件</div><div v-else class="attachment-list"><div v-for="attachment in ticketAttachments" :key="attachment.id" class="attachment-item"><div class="attachment-icon">↗</div><div class="attachment-info"><strong>{{ attachment.originalName }}</strong><small>{{ formatFileSize(attachment.sizeBytes) }} · {{ formatDate(attachment.createdAt) }}</small></div><span :class="['attachment-scan-status', attachmentScanClass(attachment)]">{{ attachmentScanStatusLabels[attachment.scanStatus] || '等待扫描' }}</span><button v-if="isImageAttachment(attachment) && canDownloadAttachment(attachment)" type="button" class="attachment-action" @click="previewImage(attachment)">预览</button><button v-if="canDownloadAttachment(attachment)" type="button" class="attachment-action" @click="downloadAttachment(attachment)">下载</button><button v-else type="button" class="attachment-action" disabled>扫描后可下载</button><button v-if="canDeleteAttachment(attachment)" type="button" class="attachment-action danger" @click="deleteAttachment(attachment)">删除</button></div></div></section><section v-if="recommendedArticles.length" class="recommendation-section"><div class="detail-section-heading"><h3>可能有帮助的知识</h3><span>{{ recommendedArticles.length }} 篇</span></div><div class="recommendation-list"><article v-for="article in recommendedArticles" :key="article.id" class="recommendation-card"><span>{{ article.category }}</span><strong>{{ article.title }}</strong><p>{{ article.content.slice(0, 92) }}{{ article.content.length > 92 ? '…' : '' }}</p></article></div></section>
+</div><div v-if="showDetail" class="modal-backdrop" @click.self="closeTicket"><div class="modal-card detail-modal"><div class="modal-header"><div><p class="eyebrow">TICKET COLLABORATION</p><h2>{{ selectedTicket?.title }}</h2><small class="detail-ticket-no">{{ selectedTicket?.ticketNo }} · {{ statusLabels[selectedTicket?.status] || selectedTicket?.status }}</small></div><div class="detail-header-actions"><button v-if="canBulkUpdate" type="button" class="text-button detail-edit-button" @click="openEditTicketModal">编辑工单</button><button type="button" class="close-button" @click="closeTicket">×</button></div></div><div v-if="loadingDetail" class="empty-state">正在加载工单时间线…</div><template v-else><div class="detail-summary"><div><span>分类</span><strong>{{ selectedTicket?.category || '未分类' }}</strong></div><div><span>优先级</span><strong>{{ priorityLabels[selectedTicket?.priority] || selectedTicket?.priority }}</strong></div><div><span>处理人</span><strong>{{ assigneeName(selectedTicket) }}</strong></div><div><span>创建时间</span><strong>{{ formatDate(selectedTicket?.createdAt) }}</strong></div><div><span>SLA 截止</span><strong>{{ formatDate(selectedTicket?.dueAt) }} · {{ isOverdue(selectedTicket) ? "已逾期" : "按时" }}</strong></div></div><section class="ticket-assets-section"><div class="detail-section-heading"><h3>关联配置项</h3><span>{{ ticketAssetLinks.length }} 项</span></div><div v-if="!ticketAssetLinks.length" class="cmdb-empty-note">该工单还没有关联服务器、应用或业务服务。</div><div v-else class="ticket-asset-list"><div v-for="link in ticketAssetLinks" :key="link.assetId" class="ticket-asset-row"><div><strong>{{ link.asset?.name }}</strong><small>{{ link.asset?.assetNo }} · {{ assetTypeLabel(link.asset?.assetType) }} · {{ linkTypeLabel(link.linkType) }}</small><small v-if="link.note">{{ link.note }}</small></div><button v-if="canBulkUpdate" type="button" class="row-action danger" @click="unlinkTicketAsset(link)">解除</button></div></div><div v-if="canBulkUpdate && availableTicketAssets.length" class="ticket-asset-linker"><select v-model="ticketAssetSelection" aria-label="选择配置项"><option value="">选择要关联的配置项</option><option v-for="asset in availableTicketAssets" :key="asset.id" :value="asset.id">{{ asset.assetNo }} · {{ asset.name }}</option></select><button type="button" class="secondary-button" :disabled="!ticketAssetSelection || linkingTicketAsset" @click="linkSelectedTicketAsset">{{ linkingTicketAsset ? '关联中…' : '关联配置项' }}</button></div><small v-else-if="canBulkUpdate" class="cmdb-link-hint">当前没有可关联的运行中配置项，请先到资产 CMDB 登记资产。</small></section><section class="attachments-section"><div class="detail-section-heading"><h3>附件</h3><span>{{ ticketAttachments.length }} 个文件</span></div><div class="attachment-toolbar"><label class="upload-attachment-button">{{ uploadingAttachment ? '上传中…' : '＋ 上传附件' }}<input type="file" hidden :disabled="uploadingAttachment" @change="uploadAttachment" accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.md,.csv,.doc,.docx,.xls,.xlsx,.zip,.log" /></label><small>{{ attachmentUploadHint }}</small></div><div v-if="attachmentUploadProgress.active" class="attachment-upload-progress"><div class="attachment-upload-progress-header"><div><strong>{{ attachmentUploadProgress.fileName }}</strong><small>{{ attachmentUploadProgress.statusText }}</small></div><button type="button" @click="cancelAttachmentUpload">取消上传</button></div><div class="attachment-upload-progress-track"><i :style="{ width: attachmentUploadProgress.percent + '%' }"></i></div><small>{{ attachmentUploadProgress.percent }}% · {{ attachmentUploadProgress.uploadedParts }}/{{ attachmentUploadProgress.totalParts }} 个分片</small></div><div v-if="!ticketAttachments.length" class="attachment-empty">暂无附件</div><div v-else class="attachment-list"><div v-for="attachment in ticketAttachments" :key="attachment.id" class="attachment-item"><div class="attachment-icon">↗</div><div class="attachment-info"><strong>{{ attachment.originalName }}</strong><small>{{ formatFileSize(attachment.sizeBytes) }} · {{ formatDate(attachment.createdAt) }}</small></div><span :class="['attachment-scan-status', attachmentScanClass(attachment)]">{{ attachmentScanStatusLabels[attachment.scanStatus] || '等待扫描' }}</span><button v-if="isImageAttachment(attachment) && canDownloadAttachment(attachment)" type="button" class="attachment-action" @click="previewImage(attachment)">预览</button><button v-if="canDownloadAttachment(attachment)" type="button" class="attachment-action" @click="downloadAttachment(attachment)">下载</button><button v-else type="button" class="attachment-action" disabled>扫描后可下载</button><button v-if="canDeleteAttachment(attachment)" type="button" class="attachment-action danger" @click="deleteAttachment(attachment)">删除</button></div></div></section><section v-if="recommendedArticles.length" class="recommendation-section"><div class="detail-section-heading"><h3>可能有帮助的知识</h3><span>{{ recommendedArticles.length }} 篇</span></div><div class="recommendation-list"><article v-for="article in recommendedArticles" :key="article.id" class="recommendation-card"><span>{{ article.category }}</span><strong>{{ article.title }}</strong><p>{{ article.content.slice(0, 92) }}{{ article.content.length > 92 ? '…' : '' }}</p></article></div></section>
 <section class="timeline-section"><div class="detail-section-heading"><h3>协作时间线</h3><span>{{ ticketAuditLogs.length + ticketComments.length }} 条记录</span></div><div v-if="!ticketAuditLogs.length && !ticketComments.length" class="empty-state">还没有协作记录。</div><div v-for="log in ticketAuditLogs" :key="`log-${log.id}`" class="timeline-item"><i></i><div><div class="timeline-meta"><strong>{{ auditLabels[log.action] || log.action }}</strong><span>{{ formatDate(log.createdAt) }}</span></div><p>{{ log.detail }}</p></div></div><div v-for="comment in ticketComments" :key="`comment-${comment.id}`" class="timeline-item comment-item"><i></i><div><div class="timeline-meta"><strong>{{ comment.visibility === 'INTERNAL' ? "内部备注" : "公开回复" }} · 用户 #{{ comment.authorId }}</strong><span>{{ formatDate(comment.createdAt) }}</span></div><p>{{ comment.content }}</p></div></div></section><form class="comment-form" @submit.prevent="addComment"><textarea v-model="commentForm.content" required rows="3" placeholder="补充处理进展、结论或下一步计划…"></textarea><div class="comment-controls"><select v-if="canWriteInternal" v-model="commentForm.visibility"><option value="PUBLIC">公开回复</option><option value="INTERNAL">内部备注</option></select><button class="primary-button">添加评论</button></div></form></template></div></div>    <div v-if="showEditTicketModal" class="modal-backdrop" @click.self="closeEditTicketModal"><form class="modal-card edit-ticket-modal" @submit.prevent="saveTicketEdit"><div class="modal-header"><div><p class="eyebrow">EDIT TICKET</p><h2>编辑工单</h2><small class="detail-ticket-no">{{ editingTicket?.ticketNo }} · 仅修改基础信息</small></div><button type="button" class="close-button" @click="closeEditTicketModal">×</button></div><label>标题<input v-model="ticketEditForm.title" required maxlength="160" placeholder="请输入工单标题" /></label><label>描述<textarea v-model="ticketEditForm.description" required maxlength="10000" rows="7" placeholder="补充问题现象、影响范围和处理背景"></textarea></label><div class="form-grid"><label>分类<input v-model="ticketEditForm.category" maxlength="64" placeholder="例如：网络" /></label><label>优先级<select v-model="ticketEditForm.priority"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option><option value="URGENT">紧急</option></select></label></div><p class="edit-ticket-hint">状态、处理人和 SLA 截止时间请通过详情页中的对应操作管理。</p><div class="modal-actions"><button type="button" class="secondary-button" @click="closeEditTicketModal">取消</button><button class="primary-button" :disabled="savingTicketEdit">{{ savingTicketEdit ? '保存中…' : '保存修改' }}</button></div></form></div><div v-if="showAssignModal" class="modal-backdrop" @click.self="closeAssignModal"><form class="modal-card assign-modal" @submit.prevent="assignTicket"><div class="modal-header"><div><p class="eyebrow">ROUTE REQUEST</p><h2>指派处理人</h2><small class="detail-ticket-no">{{ assignTarget?.ticketNo }} · {{ assignTarget?.title }}</small></div><button type="button" class="close-button" @click="closeAssignModal">×</button></div><label>选择客服<select v-model="assignForm.assigneeId" required><option value="" disabled>请选择处理人</option><option v-for="staff in staffMembers" :key="staff.id" :value="staff.id">{{ staff.displayName }} · {{ staff.roles.join(' / ') }}</option></select></label><div class="modal-actions"><button type="button" class="secondary-button" @click="closeAssignModal">取消</button><button class="primary-button">确认指派</button></div></form></div>
     <div v-if="showCmdbAssetModal" class="modal-backdrop" @click.self="closeCmdbAssetModal"><form class="modal-card cmdb-asset-modal" @submit.prevent="saveCmdbAsset"><div class="modal-header"><div><p class="eyebrow">CONFIGURATION ITEM</p><h2>{{ editingCmdbAsset ? '编辑资产' : '登记资产' }}</h2><small class="detail-ticket-no">资产编号在当前租户内必须唯一</small></div><button type="button" class="close-button" @click="closeCmdbAssetModal">×</button></div><div class="form-grid"><label>资产编号<input v-model="cmdbAssetForm.assetNo" required maxlength="40" placeholder="例如：APP-ORDER-001" /></label><label>资产名称<input v-model="cmdbAssetForm.name" required maxlength="120" placeholder="例如：订单服务" /></label></div><div class="form-grid"><label>资产类型<select v-model="cmdbAssetForm.assetType"><option v-for="(label, key) in assetTypeLabels" :key="key" :value="key">{{ label }}</option></select></label><label>运行环境<select v-model="cmdbAssetForm.environment"><option v-for="(label, key) in assetEnvironmentLabels" :key="key" :value="key">{{ label }}</option></select></label></div><div class="form-grid"><label>运行状态<select v-model="cmdbAssetForm.status"><option v-for="(label, key) in assetStatusLabels" :key="key" :value="key">{{ label }}</option></select></label><label>业务重要性<select v-model="cmdbAssetForm.criticality"><option v-for="(label, key) in assetCriticalityLabels" :key="key" :value="key">{{ label }}</option></select></label></div><div class="form-grid"><label>业务系统<input v-model="cmdbAssetForm.businessSystem" maxlength="120" placeholder="例如：交易平台" /></label><label>部署位置<input v-model="cmdbAssetForm.location" maxlength="120" placeholder="例如：生产集群 A" /></label></div><label>负责人<select v-model="cmdbAssetForm.ownerId"><option :value="null">未指定</option><option v-for="staff in staffMembers" :key="staff.id" :value="staff.id">{{ staff.displayName }} · {{ staff.roles.join(' / ') }}</option></select></label><label>资产说明<textarea v-model="cmdbAssetForm.description" maxlength="1000" rows="4" placeholder="记录用途、访问入口、维护窗口等信息"></textarea></label><label>扩展属性<textarea v-model="cmdbAssetForm.metadataJson" maxlength="4000" rows="3" placeholder="例如：owner=platform；runtime=Java 17"></textarea></label><div class="modal-actions"><button type="button" class="secondary-button" @click="closeCmdbAssetModal">取消</button><button class="primary-button" :disabled="savingCmdbAsset">{{ savingCmdbAsset ? '保存中…' : editingCmdbAsset ? '保存修改' : '登记资产' }}</button></div></form></div><div v-if="showCmdbRelationModal" class="modal-backdrop" @click.self="closeCmdbRelationModal"><form class="modal-card cmdb-relation-modal" @submit.prevent="saveCmdbRelation"><div class="modal-header"><div><p class="eyebrow">ASSET RELATION</p><h2>建立资产关系</h2><small class="detail-ticket-no">{{ selectedCmdbAsset?.assetNo }} · {{ selectedCmdbAsset?.name }}</small></div><button type="button" class="close-button" @click="closeCmdbRelationModal">×</button></div><label>目标配置项<select v-model="cmdbRelationForm.targetAssetId" required><option value="" disabled>请选择目标资产</option><option v-for="asset in cmdbAssets.filter(item => item.id !== selectedCmdbAsset?.id && item.status !== 'RETIRED')" :key="asset.id" :value="asset.id">{{ asset.assetNo }} · {{ asset.name }}</option></select></label><label>关系类型<select v-model="cmdbRelationForm.relationType"><option v-for="(label, key) in assetRelationLabels" :key="key" :value="key">{{ label }}</option></select></label><label>关系说明<textarea v-model="cmdbRelationForm.description" maxlength="500" rows="3" placeholder="例如：订单服务通过内部网络访问订单数据库"></textarea></label><p class="report-subscription-form-hint">关系方向为“当前资产 → 目标资产”，系统会在影响分析中同时展示依赖方和被依赖方。</p><div class="modal-actions"><button type="button" class="secondary-button" @click="closeCmdbRelationModal">取消</button><button class="primary-button" :disabled="savingCmdbRelation">{{ savingCmdbRelation ? '建立中…' : '建立关系' }}</button></div></form></div>    <div v-if="showChangeModal" class="modal-backdrop" @click.self="closeChangeModal"><form class="modal-card change-modal" @submit.prevent="saveChange"><div class="modal-header"><div><p class="eyebrow">NEW CHANGE REQUEST</p><h2>提交变更申请</h2><small class="detail-ticket-no">标准低风险变更会自动预批准，其余变更进入管理员审批队列。</small></div><button type="button" class="close-button" @click="closeChangeModal">×</button></div><label>变更标题<input v-model="changeForm.title" required maxlength="160" placeholder="例如：订单数据库版本升级" /></label><label>变更描述<textarea v-model="changeForm.description" required maxlength="10000" rows="4" placeholder="说明为什么变更、影响哪些业务以及当前背景"></textarea></label><div class="form-grid"><label>变更类型<select v-model="changeForm.changeType"><option value="STANDARD">标准</option><option value="NORMAL">普通</option><option value="EMERGENCY">紧急</option></select></label><label>风险等级<select v-model="changeForm.riskLevel"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option><option value="CRITICAL">严重</option></select></label></div><label>影响范围<input v-model="changeForm.impactScope" maxlength="500" placeholder="例如：订单服务、数据库集群和客服查询" /></label><div class="form-grid"><label>计划开始<input v-model="changeForm.scheduledStart" type="datetime-local" /></label><label>计划结束<input v-model="changeForm.scheduledEnd" type="datetime-local" /></label></div><label>实施方案<textarea v-model="changeForm.implementationPlan" required maxlength="10000" rows="4" placeholder="按步骤写清执行顺序、负责人和监控点"></textarea></label><label>验证方案<textarea v-model="changeForm.validationPlan" maxlength="10000" rows="3" placeholder="例如：验证订单创建、查询、监控指标和错误率"></textarea></label><label>回滚方案<textarea v-model="changeForm.rollbackPlan" required maxlength="10000" rows="4" placeholder="写清触发条件、回滚步骤和恢复后的验证方式"></textarea></label><label>关联工单 ID（可选）<input v-model="changeForm.linkedTicketId" type="number" min="1" placeholder="例如：1001" /></label><label>实施任务（可选）<textarea v-model="changeForm.taskTitles" rows="3" placeholder="每行一个任务，例如：&#10;备份数据库&#10;执行灰度升级&#10;验证业务指标"></textarea></label><div class="modal-actions"><button type="button" class="secondary-button" @click="closeChangeModal">取消</button><button class="primary-button" :disabled="savingChange">{{ savingChange ? '提交中…' : '提交变更申请' }}</button></div></form></div>
     <div v-if="showChangeDecisionModal" class="modal-backdrop" @click.self="closeChangeDecisionModal"><form class="modal-card change-decision-modal" @submit.prevent="submitChangeDecision"><div class="modal-header"><div><p class="eyebrow">CHANGE APPROVAL</p><h2>{{ changeDecision === 'REJECT' ? '驳回变更申请' : '审批变更申请' }}</h2><small class="detail-ticket-no">{{ selectedChange?.changeNo }} · {{ selectedChange?.title }}</small></div><button type="button" class="close-button" @click="closeChangeDecisionModal">×</button></div><div class="change-decision-summary"><strong>{{ selectedChange?.title }}</strong><p>{{ selectedChange?.description }}</p><div><span>{{ changeTypeLabel(selectedChange?.changeType) }}变更</span><span>{{ changeRiskLabel(selectedChange?.riskLevel) }}风险</span><span>申请人 #{{ selectedChange?.requesterId }}</span></div></div><label>{{ changeDecision === 'REJECT' ? '驳回原因' : '审批意见（可选）' }}<textarea v-model="changeDecisionForm.comment" :required="changeDecision === 'REJECT'" maxlength="500" rows="4" :placeholder="changeDecision === 'REJECT' ? '请说明未通过原因' : '例如：已确认窗口、回滚方案和业务负责人'" /></label><div class="modal-actions"><button type="button" class="secondary-button" @click="closeChangeDecisionModal">取消</button><button :class="changeDecision === 'REJECT' ? 'danger-button' : 'primary-button'" :disabled="decidingChange">{{ decidingChange ? '处理中…' : changeDecision === 'REJECT' ? '确认驳回' : '通过申请' }}</button></div></form></div>    <div v-if="showProblemModal" class="modal-backdrop" @click.self="closeProblemModal"><form class="modal-card problem-modal" @submit.prevent="saveProblem"><div class="modal-header"><div><p class="eyebrow">NEW PROBLEM RECORD</p><h2>登记问题单</h2><small class="detail-ticket-no">适合记录重复故障、重大事件的共同根因或长期风险。</small></div><button type="button" class="close-button" @click="closeProblemModal">×</button></div><label>问题标题<input v-model="problemForm.title" required maxlength="160" placeholder="例如：订单数据库连接反复失败" /></label><label>问题描述<textarea v-model="problemForm.description" required maxlength="10000" rows="4" placeholder="说明故障模式、出现频率和已知背景"></textarea></label><div class="form-grid"><label>优先级<select v-model="problemForm.priority"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option><option value="CRITICAL">严重</option></select></label><label>负责人<select v-model="problemForm.ownerId"><option value="">未指定负责人</option><option v-for="staff in staffMembers" :key="staff.id" :value="staff.id">{{ staff.displayName }}</option></select></label></div><label>业务影响<textarea v-model="problemForm.businessImpact" maxlength="1000" rows="3" placeholder="影响哪些业务、用户或 SLA 指标"></textarea></label><label>临时规避方案<textarea v-model="problemForm.workaround" maxlength="10000" rows="3" placeholder="已有的临时绕行方式；没有可以留空"></textarea></label><label class="checkbox-field"><input v-model="problemForm.knownError" type="checkbox" /> 已经确认是已知错误</label><label>分析任务（可选）<textarea v-model="problemForm.taskTitles" rows="3" placeholder="每行一个任务，例如：&#10;复现故障并收集日志&#10;确认根因&#10;制定修复方案"></textarea></label><div class="modal-actions"><button type="button" class="secondary-button" @click="closeProblemModal">取消</button><button class="primary-button" :disabled="savingProblem">{{ savingProblem ? '提交中…' : '登记问题单' }}</button></div></form></div>
