@@ -2,13 +2,15 @@
 import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
-import { VIEW_META, viewPath } from './app/navigation'
+import { breadcrumbsForView, VIEW_META, viewPath } from './app/navigation'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
 import PageErrorBanner from './components/common/PageErrorBanner.vue'
 import ToastMessage from './components/common/ToastMessage.vue'
 import LoginView from './views/LoginView.vue'
+import RoleWorkspaceHome from './views/RoleWorkspaceHome.vue'
 import { useSessionStore } from './stores/session'
+import { useWorkspaceStore } from './stores/workspace'
 import { usePermissions } from './composables/usePermissions'
 import { createHttpClient } from './services/http'
 import {
@@ -44,6 +46,7 @@ const IdentityAccessCenter = defineAsyncComponent(() => import('./components/Ide
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
+const workspacePreferences = useWorkspaceStore()
 const { token, user, displayName } = storeToRefs(session)
 const { isAdmin, isStaff: canBulkUpdate } = usePermissions(user)
 const httpClient = createHttpClient({ getToken: () => token.value, onUnauthorized: logout })
@@ -495,7 +498,8 @@ watch(() => route.meta.view, view => {
 
 watch(activeView, view => {
   if (route.meta.view !== view) router.push(viewPath(view)).catch(() => {})
-})
+  if (token.value) workspacePreferences.recordVisit(view)
+}, { immediate: true })
 
 function navigateTo(view) {
   if (view === 'team') openTeam()
@@ -566,11 +570,25 @@ const pageEyebrow = computed(() => VIEW_META[activeView.value]?.eyebrow || 'OPSF
 const pageTitle = computed(() => activeView.value === 'overview'
   ? '早上好，' + displayName.value
   : VIEW_META[activeView.value]?.title || 'OpsFlow')
+const pageBreadcrumbs = computed(() => breadcrumbsForView(activeView.value))
 const activeCount = computed(() => dashboardOverview.value?.active ?? tickets.value.filter(ticket => ['OPEN', 'IN_PROGRESS', 'WAITING_CONFIRMATION'].includes(ticket.status)).length)
 const urgentCount = computed(() => dashboardOverview.value?.urgent ?? tickets.value.filter(ticket => ticket.priority === 'URGENT').length)
 const resolvedCount = computed(() => dashboardOverview.value?.resolved ?? tickets.value.filter(ticket => ['RESOLVED', 'CLOSED'].includes(ticket.status)).length)
 const unassignedCount = computed(() => dashboardOverview.value?.unassigned ?? tickets.value.filter(ticket => !ticket.assigneeId).length)
 const assignedCount = computed(() => dashboardOverview.value?.assigned ?? tickets.value.filter(ticket => ticket.assigneeId).length)
+const waitingConfirmationCount = computed(() => {
+  const dashboardMetric = dashboardOverview.value?.statuses?.find(item => item.key === 'WAITING_CONFIRMATION')
+  return dashboardMetric?.count ?? tickets.value.filter(ticket => ticket.status === 'WAITING_CONFIRMATION').length
+})
+const roleHomeCounts = computed(() => ({
+  ...sidebarCounts.value,
+  active: activeCount.value,
+  overdue: slaSummary.value.overdue,
+  urgent: urgentCount.value,
+  unassigned: unassignedCount.value,
+  waitingConfirmation: waitingConfirmationCount.value,
+  unreadNotifications: notificationUnread.value
+}))
 const createdToday = computed(() => dashboardOverview.value?.createdToday ?? 0)
 const resolvedToday = computed(() => dashboardOverview.value?.resolvedToday ?? 0)
 const statusMetrics = computed(() => dashboardOverview.value?.statuses || [])
@@ -792,6 +810,7 @@ async function signIn(credentials) {
 
 function establishSession(data) {
   session.establish(data)
+  workspacePreferences.recordVisit(activeView.value)
 }
 
 async function loadSsoProviders() {
@@ -2956,6 +2975,7 @@ onMounted(async () => {
         <AppTopbar
           :eyebrow="pageEyebrow"
           :title="pageTitle"
+          :breadcrumbs="pageBreadcrumbs"
           :display-name="displayName"
           :user="user"
           :unread="notificationUnread"
@@ -2964,6 +2984,7 @@ onMounted(async () => {
           :notifications-loading="loadingNotifications"
           :is-staff="canBulkUpdate"
           :format-date="formatDate"
+          @navigate="navigateTo"
           @toggle-notifications="toggleNotifications"
           @preferences="showNotificationPreferences = true; showNotifications = false"
           @scan-sla="runSlaScan"
@@ -2974,7 +2995,15 @@ onMounted(async () => {
         <PageErrorBanner :message="error" @dismiss="error = ''" />
 
         <section v-if="activeView === 'overview'" class="view-panel">
-          <div class="hero-row"><div><span class="tag">TODAY'S CONTROL ROOM</span><h2>把团队的注意力，<br /><span>放在真正重要的请求上。</span></h2><p>从接收到解决，每一步都有记录，每个知识都能复用。</p></div><button class="primary-button" @click="showTicketModal = true">＋ 创建新工单</button></div>
+          <RoleWorkspaceHome
+            :display-name="displayName"
+            :is-admin="isAdmin"
+            :is-staff="canBulkUpdate"
+            :counts="roleHomeCounts"
+            @navigate="navigateTo"
+            @create-ticket="showTicketModal = true"
+            @search="globalSearchRef?.openSearch()"
+          />
           <div class="stat-grid"><article class="stat-card"><div class="stat-icon blue">◫</div><span>全部工单</span><strong>{{ dashboardOverview?.total ?? ticketTotal }}</strong><small>当前可见范围</small></article><article class="stat-card"><div class="stat-icon amber">◷</div><span>处理中</span><strong>{{ activeCount }}</strong><small>需要团队持续跟进</small></article><article class="stat-card"><div class="stat-icon red">!</div><span>SLA 逾期</span><strong>{{ slaSummary.overdue }}</strong><small>需要立即升级处理</small></article><article class="stat-card"><div class="stat-icon amber">⚡</div><span>紧急事项</span><strong>{{ urgentCount }}</strong><small>优先处理高影响请求</small></article><article class="stat-card"><div class="stat-icon green">✓</div><span>已解决</span><strong>{{ resolvedCount }}</strong><small>今日新增 {{ resolvedToday }} 张</small></article></div>
           <div class="two-column"><article class="panel-card"><div class="panel-heading"><div><p class="eyebrow">LATEST REQUESTS</p><h3>最近工单</h3></div><button class="text-button" @click="activeView = 'tickets'">查看全部 →</button></div><div v-if="loading" class="empty-state">正在同步数据…</div><div v-else-if="!tickets.length" class="empty-state">还没有工单，创建第一张工单吧。</div><div v-else class="ticket-list"><div v-for="ticket in tickets.slice(0, 5)" :key="ticket.id" class="ticket-row"><code>#{{ ticket.ticketNo?.replace('OPF-', '') || ticket.id }}</code><div><strong>{{ ticket.title }}</strong><small>{{ ticket.category || '未分类' }} · {{ assigneeName(ticket) }} · {{ formatDate(ticket.createdAt) }}</small></div><span :class="['status-pill', statusClass(ticket.status)]">{{ statusLabels[ticket.status] || ticket.status }}</span></div></div></article><article class="panel-card knowledge-highlight"><div class="panel-heading"><div><p class="eyebrow">KNOWLEDGE SIGNAL</p><h3>知识库</h3></div><button class="text-button" @click="activeView = 'knowledge'">浏览 →</button></div><div class="knowledge-number">{{ articleTotal }}<small>篇</small></div><p>把解决方案沉淀下来，让下一次响应更快。</p><div class="knowledge-line"><span></span></div><small>本租户已发布知识文章</small></article></div>
           <div class="dashboard-insights"><article class="panel-card"><div class="panel-heading"><div><p class="eyebrow">QUEUE HEALTH</p><h3>队列结构</h3></div><span class="insight-caption">今日新增 {{ createdToday }}</span></div><div class="metric-bars"><div v-for="metric in statusMetrics" :key="metric.key" class="metric-row"><span>{{ metric.label }}</span><div class="metric-track"><i :class="statusClass(metric.key)" :style="{ width: (dashboardOverview?.total ? Math.max(4, metric.count / dashboardOverview.total * 100) : 4) + '%' }"></i></div><b>{{ metric.count }}</b></div></div></article><article class="panel-card"><div class="panel-heading"><div><p class="eyebrow">OWNERSHIP</p><h3>处理覆盖</h3></div><span class="insight-caption">{{ assignedCount }} / {{ dashboardOverview?.total ?? 0 }}</span></div><div class="ownership-ring" :style="{ '--coverage': dashboardOverview?.total ? Math.round(assignedCount / dashboardOverview.total * 360) : 0 }"><div><strong>{{ dashboardOverview?.total ? Math.round(assignedCount / dashboardOverview.total * 100) : 0 }}%</strong><small>已分配</small></div></div><div class="ownership-meta"><span><i class="dot green"></i>已分配 {{ assignedCount }}</span><span><i class="dot amber"></i>待认领 {{ unassignedCount }}</span></div></article><article class="panel-card"><div class="panel-heading"><div><p class="eyebrow">PRIORITY MIX</p><h3>优先级分布</h3></div></div><div class="priority-mix"><div v-for="metric in priorityMetrics" :key="metric.key" class="priority-chip"><span>{{ metric.label }}</span><strong>{{ metric.count }}</strong></div></div></article></div>

@@ -54,7 +54,39 @@ export const NAV_ITEMS = Object.freeze([
   { key: 'team', icon: '♙', label: '团队管理', access: 'admin', count: 'teamUserCount' }
 ])
 
+export const NAV_GROUPS = Object.freeze([
+  { key: 'workspace', label: '工作空间', items: ['overview', 'workbench'] },
+  { key: 'service', label: '服务管理', items: ['catalog', 'tickets', 'satisfaction', 'knowledge'] },
+  { key: 'response', label: '运营响应', items: ['supportGroups', 'alerts', 'incidents', 'oncall', 'statusPage', 'postmortems'] },
+  { key: 'delivery', label: '治理交付', items: ['problems', 'changes', 'releases', 'runbooks', 'cmdb'] },
+  { key: 'platform', label: '平台管理', items: ['team', 'integrations', 'attachmentSecurity', 'messages'] },
+  { key: 'reliability', label: '可靠性', items: ['reliability', 'capacity', 'disasterRecovery', 'resilienceChaos'] }
+])
+
+const ITEM_BY_KEY = Object.freeze(Object.fromEntries(NAV_ITEMS.map(item => [item.key, item])))
+const GROUP_BY_VIEW = Object.freeze(Object.fromEntries(
+  NAV_GROUPS.flatMap(group => group.items.map(view => [view, group]))
+))
+
 export function viewPath(view) {
   return VIEW_META[view]?.path || VIEW_META.overview.path
+}
+
+export function navigationItem(view) {
+  return ITEM_BY_KEY[view] || ITEM_BY_KEY.overview
+}
+
+export function navigationGroup(view) {
+  return GROUP_BY_VIEW[view] || NAV_GROUPS[0]
+}
+
+export function breadcrumbsForView(view) {
+  const item = navigationItem(view)
+  const group = navigationGroup(view)
+  return [
+    { label: 'OpsFlow', view: 'overview' },
+    { label: group.label },
+    { label: item.label, current: true }
+  ]
 }
 

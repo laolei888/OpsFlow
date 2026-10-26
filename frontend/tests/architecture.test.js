@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { NAV_ITEMS, VIEW_META, viewPath } from '../src/app/navigation.js'
+import { breadcrumbsForView, NAV_GROUPS, NAV_ITEMS, VIEW_META, viewPath } from '../src/app/navigation.js'
 import { createHttpClient } from '../src/services/http.js'
 
 test('every navigation item has a registered route and unique key', () => {
@@ -13,6 +13,18 @@ test('route paths are unique and unknown views fall back to overview', () => {
   const paths = Object.values(VIEW_META).map(meta => meta.path)
   assert.equal(new Set(paths).size, paths.length)
   assert.equal(viewPath('missing-view'), '/overview')
+})
+
+test('navigation groups cover each menu item exactly once', () => {
+  const groupedKeys = NAV_GROUPS.flatMap(group => group.items)
+  const itemKeys = NAV_ITEMS.map(item => item.key)
+  assert.equal(new Set(groupedKeys).size, groupedKeys.length)
+  assert.deepEqual([...groupedKeys].sort(), [...itemKeys].sort())
+})
+
+test('breadcrumbs identify the group and current page', () => {
+  assert.deepEqual(breadcrumbsForView('alerts').map(item => item.label), ['OpsFlow', '运营响应', '监控告警'])
+  assert.equal(breadcrumbsForView('alerts').at(-1).current, true)
 })
 
 test('admin routes declare admin access', () => {

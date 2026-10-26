@@ -1,7 +1,10 @@
 <script setup>
+import BreadcrumbTrail from './BreadcrumbTrail.vue'
+
 defineProps({
   eyebrow: { type: String, default: 'OPSFLOW' },
   title: { type: String, default: 'OpsFlow' },
+  breadcrumbs: { type: Array, default: () => [] },
   displayName: { type: String, default: '协作成员' },
   user: { type: Object, default: null },
   unread: { type: Number, default: 0 },
@@ -12,12 +15,15 @@ defineProps({
   formatDate: { type: Function, required: true }
 })
 
-defineEmits(['toggle-notifications', 'preferences', 'scan-sla', 'mark-all', 'open-notification', 'change-password'])
+defineEmits(['navigate', 'toggle-notifications', 'preferences', 'scan-sla', 'mark-all', 'open-notification', 'change-password'])
 </script>
 
 <template>
   <header class="topbar">
-    <div><p class="eyebrow">{{ eyebrow }}</p><h1>{{ title }}</h1></div>
+    <div class="topbar-heading">
+      <BreadcrumbTrail :items="breadcrumbs" @navigate="$emit('navigate', $event)" />
+      <p class="eyebrow">{{ eyebrow }}</p><h1>{{ title }}</h1>
+    </div>
     <div class="topbar-user">
       <div class="notification-wrap">
         <button class="notification-button" type="button" aria-label="打开通知中心" @click="$emit('toggle-notifications')">♢<b v-if="unread">{{ unread > 99 ? '99+' : unread }}</b></button>
