@@ -56,6 +56,9 @@ public class TicketController {
         Ticket ticket = new Ticket();
         ticket.setTitle(request.title());
         ticket.setDescription(request.description());
+        ticket.setImpactScope(request.impactScope());
+        ticket.setExpectedOutcome(request.expectedOutcome());
+        ticket.setAttemptedActions(request.attemptedActions());
         ticket.setCategory(request.category());
         ticket.setPriority(request.priority());
         return ApiResponse.ok(ticketService.create(ticket, principal.id(), principal.tenantId(), idempotencyKey), "工单创建成功");
@@ -69,6 +72,7 @@ public class TicketController {
             throw new BusinessException("只有客服或管理员可以编辑工单");
         }
         return ApiResponse.ok(ticketService.updateDetails(id, request.title(), request.description(),
+                        request.impactScope(), request.expectedOutcome(), request.attemptedActions(),
                         request.category(), request.priority(), principal.id(), principal.tenantId()),
                 "工单信息已更新");
     }
@@ -150,10 +154,19 @@ public class TicketController {
     public record UpdateTicketRequest(
             @NotBlank @Size(max = 160) String title,
             @NotBlank @Size(max = 10000) String description,
+            @Size(max = 1000) String impactScope,
+            @Size(max = 1000) String expectedOutcome,
+            @Size(max = 3000) String attemptedActions,
             @Size(max = 64) String category,
             @NotNull TicketPriority priority) { }
-    public record CreateTicketRequest(@NotBlank String title, @NotBlank String description,
-                                      String category, TicketPriority priority) { }
+    public record CreateTicketRequest(
+            @NotBlank @Size(max = 160) String title,
+            @NotBlank @Size(max = 10000) String description,
+            @Size(max = 1000) String impactScope,
+            @Size(max = 1000) String expectedOutcome,
+            @Size(max = 3000) String attemptedActions,
+            @Size(max = 64) String category,
+            TicketPriority priority) { }
 
     public record BatchUpdateRequest(@NotEmpty @Size(max = 100) List<Long> ticketIds,
                                      TicketStatus targetStatus, TicketPriority priority) { }

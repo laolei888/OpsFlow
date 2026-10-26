@@ -270,8 +270,10 @@ curl -X POST http://localhost:8081/api/v1/tickets \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Idempotency-Key: 7f7a4f2d-创建工单-001" \
   -H "Content-Type: application/json" \
-  -d '{"title":"VPN 无法连接","description":"办公室网络无法访问 VPN","category":"网络","priority":"HIGH"}'
+  -d '{"title":"VPN 无法连接","description":"客户端持续连接超时","impactScope":"研发团队无法远程办公","expectedOutcome":"恢复 VPN 访问","attemptedActions":"重启客户端并切换网络","category":"网络","priority":"HIGH"}'
 ```
+
+Web 管理台使用三步式工单向导：先选择场景并匹配知识文章，再结构化填写问题现象、影响范围、期望结果和已尝试措施，最后根据服务可用性、影响人数和替代方案给出优先级建议。建议值可以人工调整；结构化字段会独立入库，也可在工单详情和 CSV 导出中使用。
 
 查询工单：
 

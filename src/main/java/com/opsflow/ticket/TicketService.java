@@ -70,7 +70,10 @@ public class TicketService {
             String search = keyword.trim();
             query.and(wrapper -> wrapper.like(Ticket::getTitle, search)
                     .or().like(Ticket::getTicketNo, search)
-                    .or().like(Ticket::getDescription, search));
+                    .or().like(Ticket::getDescription, search)
+                    .or().like(Ticket::getImpactScope, search)
+                    .or().like(Ticket::getExpectedOutcome, search)
+                    .or().like(Ticket::getAttemptedActions, search));
         }
         if (overdue) {
             query.in(Ticket::getStatus, TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CONFIRMATION)
@@ -126,7 +129,10 @@ public class TicketService {
             String search = keyword.trim();
             query.and(wrapper -> wrapper.like(Ticket::getTitle, search)
                     .or().like(Ticket::getTicketNo, search)
-                    .or().like(Ticket::getDescription, search));
+                    .or().like(Ticket::getDescription, search)
+                    .or().like(Ticket::getImpactScope, search)
+                    .or().like(Ticket::getExpectedOutcome, search)
+                    .or().like(Ticket::getAttemptedActions, search));
         }
         if (overdue) {
             query.in(Ticket::getStatus, TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CONFIRMATION)
@@ -247,7 +253,9 @@ public class TicketService {
 
     private String requestHash(Ticket ticket, TicketPriority priority) {
         String source = String.join("\u0000",
-                value(ticket.getTitle()), value(ticket.getDescription()), value(ticket.getCategory()), priority.name());
+                value(ticket.getTitle()), value(ticket.getDescription()), value(ticket.getImpactScope()),
+                value(ticket.getExpectedOutcome()), value(ticket.getAttemptedActions()),
+                value(ticket.getCategory()), priority.name());
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder(digest.length * 2);
@@ -261,23 +269,33 @@ public class TicketService {
     private String value(String value) { return value == null ? "" : value.trim(); }
 
     @Transactional
-    public Ticket updateDetails(Long id, String title, String description, String category,
+    public Ticket updateDetails(Long id, String title, String description, String impactScope,
+                                String expectedOutcome, String attemptedActions, String category,
                                 TicketPriority priority, Long actorId, Long tenantId) {
         Ticket ticket = get(id, tenantId);
         String normalizedTitle = requiredText(title, "标题", 160);
         String normalizedDescription = requiredText(description, "描述", 10000);
+        String normalizedImpactScope = optionalText(impactScope, "影响范围", 1000);
+        String normalizedExpectedOutcome = optionalText(expectedOutcome, "期望结果", 1000);
+        String normalizedAttemptedActions = optionalText(attemptedActions, "已尝试措施", 3000);
         String normalizedCategory = optionalText(category, "分类", 64);
         TicketPriority normalizedPriority = priority == null ? TicketPriority.MEDIUM : priority;
 
         Map<String, Object> before = ticketSnapshot(ticket);
         boolean changed = !Objects.equals(ticket.getTitle(), normalizedTitle)
                 || !Objects.equals(ticket.getDescription(), normalizedDescription)
+                || !Objects.equals(ticket.getImpactScope(), normalizedImpactScope)
+                || !Objects.equals(ticket.getExpectedOutcome(), normalizedExpectedOutcome)
+                || !Objects.equals(ticket.getAttemptedActions(), normalizedAttemptedActions)
                 || !Objects.equals(ticket.getCategory(), normalizedCategory)
                 || ticket.getPriority() != normalizedPriority;
         if (!changed) return ticket;
 
         ticket.setTitle(normalizedTitle);
         ticket.setDescription(normalizedDescription);
+        ticket.setImpactScope(normalizedImpactScope);
+        ticket.setExpectedOutcome(normalizedExpectedOutcome);
+        ticket.setAttemptedActions(normalizedAttemptedActions);
         ticket.setCategory(normalizedCategory);
         ticket.setPriority(normalizedPriority);
         ticket.setUpdatedAt(LocalDateTime.now());
@@ -475,6 +493,9 @@ public class TicketService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("title", ticket.getTitle());
         snapshot.put("description", ticket.getDescription());
+        snapshot.put("impactScope", ticket.getImpactScope());
+        snapshot.put("expectedOutcome", ticket.getExpectedOutcome());
+        snapshot.put("attemptedActions", ticket.getAttemptedActions());
         snapshot.put("category", ticket.getCategory());
         snapshot.put("priority", ticket.getPriority() == null ? null : ticket.getPriority().name());
         return snapshot;

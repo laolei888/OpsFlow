@@ -6,6 +6,7 @@ import com.opsflow.common.BusinessException;
 import com.opsflow.supportgroup.SupportGroupService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -13,7 +14,10 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,6 +33,23 @@ class TicketControllerTest {
 
     @InjectMocks
     private TicketController controller;
+
+    @Test
+    void createPreservesStructuredRequestContext() {
+        TicketController.CreateTicketRequest request = new TicketController.CreateTicketRequest(
+                "VPN 无法连接", "客户端持续连接超时", "研发团队无法远程办公",
+                "恢复 VPN 访问", "重启客户端并切换网络", "网络", TicketPriority.HIGH);
+        when(ticketService.create(any(Ticket.class), eq(7L), eq(3L), eq("create-001")))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.create(request, "create-001", requester());
+
+        ArgumentCaptor<Ticket> captor = ArgumentCaptor.forClass(Ticket.class);
+        verify(ticketService).create(captor.capture(), eq(7L), eq(3L), eq("create-001"));
+        assertEquals("研发团队无法远程办公", captor.getValue().getImpactScope());
+        assertEquals("恢复 VPN 访问", captor.getValue().getExpectedOutcome());
+        assertEquals("重启客户端并切换网络", captor.getValue().getAttemptedActions());
+    }
 
     @Test
     void requesterCannotMoveOpenTicketIntoAgentWorkflow() {

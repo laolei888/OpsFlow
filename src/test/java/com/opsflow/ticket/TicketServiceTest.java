@@ -74,15 +74,22 @@ class TicketServiceTest {
         Ticket ticket = ticket(TicketStatus.OPEN);
         ticket.setTitle("旧标题");
         ticket.setDescription("旧描述");
+        ticket.setImpactScope("单个用户");
+        ticket.setExpectedOutcome("恢复连接");
+        ticket.setAttemptedActions("重新登录");
         ticket.setCategory("网络");
         when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
         when(ticketMapper.updateById(ticket)).thenReturn(1);
 
         Ticket updated = ticketService.updateDetails(
-                1L, " 新标题 ", " 新描述 ", "账号", TicketPriority.URGENT, 9L, 3L);
+                1L, " 新标题 ", " 新描述 ", " 全体研发人员 ", " 恢复远程访问 ",
+                " 重启客户端 ", "账号", TicketPriority.URGENT, 9L, 3L);
 
         assertEquals("新标题", updated.getTitle());
         assertEquals("新描述", updated.getDescription());
+        assertEquals("全体研发人员", updated.getImpactScope());
+        assertEquals("恢复远程访问", updated.getExpectedOutcome());
+        assertEquals("重启客户端", updated.getAttemptedActions());
         assertEquals("账号", updated.getCategory());
         assertEquals(TicketPriority.URGENT, updated.getPriority());
         verify(ticketMapper).updateById(ticket);
@@ -95,11 +102,15 @@ class TicketServiceTest {
         Ticket ticket = ticket(TicketStatus.OPEN);
         ticket.setTitle("当前标题");
         ticket.setDescription("当前描述");
+        ticket.setImpactScope("单个用户");
+        ticket.setExpectedOutcome("恢复访问");
+        ticket.setAttemptedActions("清理缓存");
         ticket.setCategory("网络");
         when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
 
         Ticket unchanged = ticketService.updateDetails(
-                1L, "当前标题", "当前描述", "网络", TicketPriority.MEDIUM, 9L, 3L);
+                1L, "当前标题", "当前描述", "单个用户", "恢复访问", "清理缓存",
+                "网络", TicketPriority.MEDIUM, 9L, 3L);
 
         assertEquals(ticket, unchanged);
         verify(ticketMapper, never()).updateById(any(Ticket.class));

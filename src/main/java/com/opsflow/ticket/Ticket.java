@@ -20,6 +20,9 @@ public class Ticket {
     private Long assignmentGroupId;
     private String title;
     private String description;
+    private String impactScope;
+    private String expectedOutcome;
+    private String attemptedActions;
     private String category;
     private TicketPriority priority;
     private TicketStatus status;

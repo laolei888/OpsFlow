@@ -39,7 +39,10 @@ public class ExportService {
             new TicketExportColumn("dueAt", "SLA截止", Ticket::getDueAt),
             new TicketExportColumn("createdAt", "创建时间", Ticket::getCreatedAt),
             new TicketExportColumn("updatedAt", "更新时间", Ticket::getUpdatedAt),
-            new TicketExportColumn("description", "描述", Ticket::getDescription)
+            new TicketExportColumn("description", "描述", Ticket::getDescription),
+            new TicketExportColumn("impactScope", "影响范围", Ticket::getImpactScope),
+            new TicketExportColumn("expectedOutcome", "期望结果", Ticket::getExpectedOutcome),
+            new TicketExportColumn("attemptedActions", "已尝试措施", Ticket::getAttemptedActions)
     );
 
     private final TicketService ticketService;

@@ -43,6 +43,7 @@ const SupportGroupCenter = defineAsyncComponent(() => import('./components/Suppo
 const CustomerSatisfactionCenter = defineAsyncComponent(() => import('./components/CustomerSatisfactionCenter.vue'))
 const IdentityAccessCenter = defineAsyncComponent(() => import('./components/IdentityAccessCenter.vue'))
 const TicketDetailView = defineAsyncComponent(() => import('./views/TicketDetailView.vue'))
+const CreateTicketWizard = defineAsyncComponent(() => import('./components/tickets/CreateTicketWizard.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -145,7 +146,10 @@ const exportFieldOptions = [
   { value: 'dueAt', label: 'SLA 截止', description: '服务时限截止时间' },
   { value: 'createdAt', label: '创建时间', description: '工单创建时间' },
   { value: 'updatedAt', label: '更新时间', description: '最近一次更新的时间' },
-  { value: 'description', label: '描述', description: '问题现象、影响范围和处理背景' }
+  { value: 'description', label: '描述', description: '问题现象与复现过程' },
+  { value: 'impactScope', label: '影响范围', description: '受影响的人员、系统或业务环节' },
+  { value: 'expectedOutcome', label: '期望结果', description: '申请人希望恢复或获得的结果' },
+  { value: 'attemptedActions', label: '已尝试措施', description: '提交前已经执行的排查动作' }
 ]
 const exportFields = ref(exportFieldOptions.map(field => field.value))
 
@@ -293,8 +297,10 @@ const automationForm = reactive({
 })
 const passwordForm = reactive({ currentPassword: '', newPassword: '' })
 
-const ticketForm = reactive({ title: '', description: '', category: '网络', priority: 'MEDIUM' })
-const ticketEditForm = reactive({ title: '', description: '', category: '', priority: 'MEDIUM' })
+const ticketEditForm = reactive({
+  title: '', description: '', impactScope: '', expectedOutcome: '', attemptedActions: '',
+  category: '', priority: 'MEDIUM'
+})
 const articleForm = reactive({ title: '', slug: '', category: '网络', content: '' })
 
 const auditLabels = { CREATED: '创建工单', KNOWLEDGE_ARTICLE_CREATED: '创建知识文章', KNOWLEDGE_ARTICLE_UPDATED: '编辑知识文章', KNOWLEDGE_ARTICLE_PUBLISHED: '发布知识文章', KNOWLEDGE_ARTICLE_ARCHIVED: '归档知识文章', KNOWLEDGE_ARTICLE_RESTORED: '恢复知识文章', KNOWLEDGE_ARTICLE_VERSION_RESTORED: '恢复历史版本', TICKET_UPDATED: '编辑工单', STATUS_CHANGED: '状态流转', COMMENT_ADDED: '新增评论', BULK_UPDATED: '批量更新工单', ASSIGNED: '领取 / 指派', UNASSIGNED: '释放工单', ATTACHMENT_ADDED: '添加附件', ATTACHMENT_DELETED: '删除附件', ATTACHMENT_SCAN_CLEAN: '附件扫描通过', ATTACHMENT_SCAN_BLOCKED: '附件威胁隔离', ATTACHMENT_SCAN_FAILED: '附件扫描失败', ATTACHMENT_SCAN_RETRY: '附件重新扫描', ATTACHMENT_MANUALLY_RELEASED: '附件人工放行', USER_CREATED: '创建用户', USER_STATUS_CHANGED: '更新用户状态', USER_ROLE_CHANGED: '更新用户角色', PASSWORD_CHANGED: '修改密码', SLA_POLICY_UPDATED: '更新 SLA 策略', EXPORT_GENERATED: '导出数据', IMPORT_GENERATED: '批量导入', SAVED_VIEW_CREATED: '创建保存视图', SAVED_VIEW_UPDATED: '更新保存视图', SAVED_VIEW_DELETED: '删除保存视图', AUTOMATION_RULE_CREATED: '创建自动化规则', AUTOMATION_RULE_UPDATED: '更新自动化规则', AUTOMATION_RULE_TOGGLED: '切换自动化规则', AUTOMATION_RULE_DELETED: '删除自动化规则', AUTOMATION_APPLIED: '执行自动化规则', REPORT_SUBSCRIPTION_CREATED: '创建报表订阅', REPORT_SUBSCRIPTION_UPDATED: '更新报表订阅', REPORT_SUBSCRIPTION_DELETED: '删除报表订阅', REPORT_SUBSCRIPTION_RUN: '生成订阅报表', SERVICE_CATALOG_ITEM_CREATED: '创建服务目录项', SERVICE_CATALOG_ITEM_UPDATED: '更新服务目录项', SERVICE_CATALOG_ITEM_TOGGLED: '切换服务目录项', SERVICE_REQUEST_CREATED: '提交服务申请', SERVICE_REQUEST_AUTO_APPROVED: '自动受理服务申请', SERVICE_REQUEST_APPROVED: '通过服务审批', SERVICE_REQUEST_REJECTED: '驳回服务审批', CMDB_ASSET_CREATED: '登记配置项', CMDB_ASSET_UPDATED: '更新配置项', CMDB_RELATION_CREATED: '建立资产关系', CMDB_RELATION_DELETED: '解除资产关系', CMDB_ASSET_LINKED: '关联工单配置项', CMDB_ASSET_UNLINKED: '解除工单配置项', INCIDENT_DECLARED: '宣布重大事件', INCIDENT_UPDATED: '更新事件指挥资料', INCIDENT_STATUS_CHANGED: '重大事件状态流转', INCIDENT_UPDATE_ADDED: '发布事件动态', INCIDENT_TASK_CREATED: '新增事件协同任务', INCIDENT_TASK_UPDATED: '更新事件协同任务', INCIDENT_TICKET_LINKED: '关联事件工单', INCIDENT_TICKET_UNLINKED: '解除事件工单关联', INCIDENT_ASSET_LINKED: '关联受影响配置项', INCIDENT_ASSET_UNLINKED: '解除事件配置项关联', ONCALL_SCHEDULE_CREATED: '创建值班表', ONCALL_SCHEDULE_UPDATED: '更新值班表', ONCALL_SHIFT_CREATED: '创建值班轮班', ONCALL_SHIFT_UPDATED: '更新值班轮班', ONCALL_SHIFT_DELETED: '删除值班轮班', ONCALL_POLICY_CREATED: '创建升级策略', ONCALL_POLICY_UPDATED: '更新升级策略', ONCALL_ESCALATION_STEP_CREATED: '新增升级步骤', ONCALL_ESCALATION_STEP_UPDATED: '更新升级步骤', ONCALL_ESCALATION_STEP_DELETED: '删除升级步骤', ONCALL_ESCALATION_TRIGGERED: '触发值班升级', ONCALL_ESCALATION_DISPATCHED: '派发值班升级通知', ONCALL_ESCALATION_RESOLVED: '停止值班升级', ONCALL_ESCALATION_CANCELLED: '取消值班升级' }
@@ -1794,6 +1800,9 @@ function openEditTicketModal() {
   Object.assign(ticketEditForm, {
     title: selectedTicket.value.title || '',
     description: selectedTicket.value.description || '',
+    impactScope: selectedTicket.value.impactScope || '',
+    expectedOutcome: selectedTicket.value.expectedOutcome || '',
+    attemptedActions: selectedTicket.value.attemptedActions || '',
     category: selectedTicket.value.category || '',
     priority: selectedTicket.value.priority || 'MEDIUM'
   })
@@ -1803,7 +1812,10 @@ function openEditTicketModal() {
 function closeEditTicketModal() {
   showEditTicketModal.value = false
   editingTicket.value = null
-  Object.assign(ticketEditForm, { title: '', description: '', category: '', priority: 'MEDIUM' })
+  Object.assign(ticketEditForm, {
+    title: '', description: '', impactScope: '', expectedOutcome: '', attemptedActions: '',
+    category: '', priority: 'MEDIUM'
+  })
 }
 
 async function saveTicketEdit() {
@@ -2717,18 +2729,15 @@ async function bulkUpdateTickets() {
   } catch (err) { error.value = err.message }
 }
 
-async function createTicket() {
-  try {
-    await api('/api/v1/tickets', {
-      method: 'POST',
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify(ticketForm)
-    })
-    Object.assign(ticketForm, { title: '', description: '', category: '网络', priority: 'MEDIUM' })
-    showTicketModal.value = false
-    notify('工单已创建')
-    await loadDashboard()
-  } catch (err) { error.value = err.message }
+async function handleTicketCreated(created) {
+  showTicketModal.value = false
+  await loadDashboard()
+  if (created?.id) await router.push({ name: 'ticketDetail', params: { ticketId: created.id } })
+}
+
+async function openWizardArticle(article) {
+  showTicketModal.value = false
+  await openArticle(article)
 }
 
 async function advanceTicket(ticket) {
@@ -3135,7 +3144,15 @@ onMounted(async () => {
     <div v-if="showServiceRequestModal" class="modal-backdrop" @click.self="closeServiceRequestModal"><form class="modal-card service-request-modal" @submit.prevent="submitServiceRequest"><div class="modal-header"><div><p class="eyebrow">NEW SERVICE REQUEST</p><h2>申请 {{ selectedCatalogItem?.name }}</h2><small class="detail-ticket-no">{{ selectedCatalogItem?.category }} · {{ selectedCatalogItem?.approvalRequired ? '需要管理员审批' : '提交后自动受理' }}</small></div><button type="button" class="close-button" @click="closeServiceRequestModal">×</button></div><div class="service-request-context"><span>{{ priorityLabels[selectedCatalogItem?.defaultPriority] || selectedCatalogItem?.defaultPriority }}优先级</span><p>{{ selectedCatalogItem?.description }}</p></div><label>申请摘要<input v-model="serviceRequestForm.summary" required maxlength="160" placeholder="简要说明你希望获得什么服务" /></label><label>详细说明<textarea v-model="serviceRequestForm.detail" required maxlength="10000" rows="6" placeholder="补充使用人、业务原因、期望时间和必要信息"></textarea></label><p class="report-subscription-form-hint">{{ selectedCatalogItem?.approvalRequired ? '提交后进入管理员审批队列；通过后系统自动创建工单并开始计算 SLA。' : '该服务无需审批，提交后会立即创建正式工单。' }}</p><div class="modal-actions"><button type="button" class="secondary-button" @click="closeServiceRequestModal">取消</button><button class="primary-button" :disabled="submittingServiceRequest">{{ submittingServiceRequest ? '提交中…' : '提交服务申请' }}</button></div></form></div>
     <div v-if="showServiceDecisionModal" class="modal-backdrop" @click.self="closeServiceDecisionModal"><form class="modal-card service-decision-modal" @submit.prevent="submitServiceDecision"><div class="modal-header"><div><p class="eyebrow">APPROVAL DECISION</p><h2>{{ serviceDecision === 'REJECT' ? '驳回服务申请' : '通过服务申请' }}</h2><small class="detail-ticket-no">{{ selectedServiceRequest?.requestNo }} · {{ selectedServiceRequest?.itemName }}</small></div><button type="button" class="close-button" @click="closeServiceDecisionModal">×</button></div><div class="service-decision-summary"><strong>{{ selectedServiceRequest?.summary }}</strong><p>{{ selectedServiceRequest?.detail }}</p><small>申请人 #{{ selectedServiceRequest?.requesterId }} · {{ priorityLabels[selectedServiceRequest?.priority] || selectedServiceRequest?.priority }}</small></div><label>{{ serviceDecision === 'REJECT' ? '驳回原因' : '审批意见（可选）' }}<textarea v-model="serviceDecisionForm.comment" :required="serviceDecision === 'REJECT'" maxlength="500" rows="4" :placeholder="serviceDecision === 'REJECT' ? '请说明未通过原因' : '例如：预算和权限范围已确认'"></textarea></label><p v-if="serviceDecision === 'APPROVE'" class="report-subscription-form-hint">通过后会自动创建正式工单，套用目录优先级、SLA 策略和自动化分派规则。</p><div class="modal-actions"><button type="button" class="secondary-button" @click="closeServiceDecisionModal">取消</button><button :class="serviceDecision === 'REJECT' ? 'danger-button' : 'primary-button'" :disabled="decidingServiceRequest">{{ decidingServiceRequest ? '处理中…' : serviceDecision === 'REJECT' ? '确认驳回' : '通过并创建工单' }}</button></div></form></div>
     <div v-if="showReportSubscriptionModal" class="modal-backdrop" @click.self="closeReportSubscriptionModal"><form class="modal-card report-subscription-modal" @submit.prevent="saveReportSubscription"><div class="modal-header"><div><p class="eyebrow">REPORT SUBSCRIPTION</p><h2>{{ editingReportSubscription ? '编辑报表订阅' : '新建报表订阅' }}</h2><small class="detail-ticket-no">生成摘要后会进入你的通知中心</small></div><button type="button" class="close-button" @click="closeReportSubscriptionModal">×</button></div><label>订阅名称<input v-model="reportSubscriptionForm.name" required maxlength="80" placeholder="例如：客服周报" /></label><div class="form-grid"><label>发送频率<select v-model="reportSubscriptionForm.frequency"><option value="DAILY">每日</option><option value="WEEKLY">每周</option></select></label><label>统计周期<select v-model.number="reportSubscriptionForm.rangeDays"><option :value="7">近 7 天</option><option :value="14">近 14 天</option><option :value="30">近 30 天</option></select></label></div><label v-if="editingReportSubscription">订阅状态<select v-model="reportSubscriptionForm.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label><p class="report-subscription-form-hint">系统会按计划在每天或每周一上午生成摘要；也可以随时点击“立即生成”测试效果。</p><div class="modal-actions"><button type="button" class="secondary-button" @click="closeReportSubscriptionModal">取消</button><button class="primary-button" :disabled="savingReportSubscription">{{ savingReportSubscription ? '保存中…' : editingReportSubscription ? '保存修改' : '创建订阅' }}</button></div></form></div>
-    <div v-if="showTicketModal" class="modal-backdrop" @click.self="showTicketModal = false"><form class="modal-card" @submit.prevent="createTicket"><div class="modal-header"><div><p class="eyebrow">NEW REQUEST</p><h2>创建工单</h2></div><button type="button" class="close-button" @click="showTicketModal = false">×</button></div><label>标题<input v-model="ticketForm.title" required placeholder="例如：VPN 无法连接" /></label><label>描述<textarea v-model="ticketForm.description" required rows="4" placeholder="描述问题现象、影响范围和已尝试的处理方式"></textarea></label><div class="form-grid"><label>分类<input v-model="ticketForm.category" /></label><label>优先级<select v-model="ticketForm.priority"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option><option value="URGENT">紧急</option></select></label></div><div class="modal-actions"><button type="button" class="secondary-button" @click="showTicketModal = false">取消</button><button class="primary-button">提交工单</button></div></form></div>
+    <CreateTicketWizard
+      v-if="showTicketModal"
+      :api="api"
+      @close="showTicketModal = false"
+      @created="handleTicketCreated"
+      @notify="notify"
+      @error="error = $event"
+      @open-article="openWizardArticle"
+    />
     <div v-if="showArticleReader" class="modal-backdrop" @click.self="closeArticleReader"><article class="modal-card article-reader-modal"><div class="modal-header"><div><p class="eyebrow">KNOWLEDGE READER</p><h2>{{ displayedArticle?.title }}</h2><small class="detail-ticket-no">{{ displayedArticle?.category }} · {{ articleStatusLabels[displayedArticle?.status] || displayedArticle?.status }}</small></div><div class="detail-header-actions"><button v-if="canBulkUpdate" type="button" class="text-button detail-edit-button" @click="openArticleVersions">版本历史</button><button v-if="canBulkUpdate" type="button" class="text-button detail-edit-button" @click="editArticleFromReader">编辑</button><button type="button" class="close-button" @click="closeArticleReader">×</button></div></div><div v-if="articleReaderLoading" class="empty-state">正在加载文章…</div><template v-else-if="displayedArticle"><div class="article-reader-meta"><span v-if="displayedArticle.versionNo">版本 v{{ displayedArticle.versionNo }}</span><span>Slug：{{ displayedArticle.slug }}</span><span>更新于 {{ formatDate(displayedArticle.updatedAt || displayedArticle.createdAt) }}</span><span v-if="displayedArticle.status === 'PUBLISHED'">阅读 {{ displayedArticle.viewCount || 0 }}</span></div><section v-if="canBulkUpdate && showArticleVersions" class="article-version-panel"><div class="article-version-heading"><div><strong>版本历史</strong><small>最多展示最近 100 个版本</small></div><button type="button" class="row-action" @click="showCurrentArticleVersion">回到当前版本</button></div><div v-if="articleVersionsLoading" class="empty-state">正在读取版本历史…</div><div v-else-if="!articleVersions.length" class="empty-state">还没有版本记录。</div><div v-else class="article-version-list"><div v-for="version in articleVersions" :key="version.id" :class="['article-version-item', { active: selectedArticleVersion?.id === version.id }]"><button type="button" class="article-version-select" @click="selectArticleVersion(version)"><span><strong>v{{ version.versionNo }}</strong><small>{{ articleVersionChangeLabels[version.changeType] || version.changeType }} · 用户 #{{ version.changedBy }}</small></span><time>{{ formatDate(version.createdAt) }}</time></button><button type="button" class="article-version-restore" @click.stop="restoreArticleVersion(version)">恢复</button></div></div></section><p v-if="displayedArticle.status !== 'PUBLISHED'" class="article-reader-preview-note">当前为内部预览，草稿和已归档文章不会计入阅读量。</p><div class="article-reader-content">{{ displayedArticle.content }}</div><section v-if="displayedArticle.status === 'PUBLISHED' && !selectedArticleVersion" class="article-feedback"><div class="article-feedback-heading"><div><strong>这篇文章解决了你的问题吗？</strong><small v-if="feedbackLoading">正在同步反馈数据…</small><small v-else-if="articleFeedback">有帮助 {{ articleFeedback.helpfulCount }} · 没帮助 {{ articleFeedback.notHelpfulCount }} · 帮助率 {{ articleFeedback.helpfulRate }}%</small></div></div><div class="article-feedback-actions"><button type="button" :disabled="submittingArticleFeedback" :class="{ active: articleFeedback?.myHelpful === true }" @click="submitArticleFeedback(true)">👍 有帮助</button><button type="button" :disabled="submittingArticleFeedback" :class="{ active: articleFeedback?.myHelpful === false }" @click="submitArticleFeedback(false)">👎 需要改进</button><button v-if="articleFeedback && articleFeedback.myHelpful !== null" type="button" class="feedback-clear" :disabled="submittingArticleFeedback" @click="clearArticleFeedback">撤销反馈</button></div></section></template></article></div>    <div v-if="showArticleModal" class="modal-backdrop" @click.self="closeArticleModal"><form class="modal-card knowledge-editor-modal" @submit.prevent="saveArticle"><div class="modal-header"><div><p class="eyebrow">KNOWLEDGE EDITOR</p><h2>{{ editingArticle ? '编辑知识文章' : '写一篇知识' }}</h2><small class="detail-ticket-no">{{ editingArticle ? '更新内容后保留当前文章状态。' : '提交后将直接发布到团队知识库。' }}</small></div><button type="button" class="close-button" @click="closeArticleModal">×</button></div><label>标题<input v-model="articleForm.title" required maxlength="160" placeholder="例如：VPN 排障指南" /></label><div class="form-grid"><label>Slug<input v-model="articleForm.slug" required maxlength="180" placeholder="vpn-troubleshooting" /></label><label>分类<input v-model="articleForm.category" required maxlength="64" /></label></div><label>内容<textarea v-model="articleForm.content" required maxlength="50000" rows="9" placeholder="记录可复用的解决步骤、注意事项和验证结果"></textarea></label><p v-if="editingArticle" class="knowledge-editor-hint">编辑不会自动改变草稿、已发布或已归档状态；请在文章卡片上使用对应操作。</p><div class="modal-actions"><button type="button" class="secondary-button" @click="closeArticleModal">取消</button><button class="primary-button" :disabled="savingArticle">{{ savingArticle ? '保存中…' : editingArticle ? '保存修改' : '发布文章' }}</button></div></form></div><div v-if="showCreateUserModal" class="modal-backdrop" @click.self="showCreateUserModal = false"><form class="modal-card" @submit.prevent="createAdminUser"><div class="modal-header"><div><p class="eyebrow">ADD TEAM MEMBER</p><h2>创建团队账号</h2><small class="detail-ticket-no">账号创建后立即生效</small></div><button type="button" class="close-button" @click="showCreateUserModal = false">×</button></div><label>登录账号<input v-model="adminUserForm.username" required minlength="4" maxlength="64" placeholder="例如：zhangsan" /></label><label>显示名称<input v-model="adminUserForm.displayName" required maxlength="64" placeholder="例如：张三" /></label><label>初始密码<input v-model="adminUserForm.password" required minlength="10" maxlength="72" type="password" placeholder="至少 10 位" /></label><label>角色<select v-model="adminUserForm.role"><option value="AGENT">客服 / 处理人</option><option value="REQUESTER">提单人</option><option value="ADMIN">管理员</option></select></label><div class="modal-actions"><button type="button" class="secondary-button" @click="showCreateUserModal = false">取消</button><button class="primary-button" :disabled="creatingAdminUser">{{ creatingAdminUser ? '创建中…' : '创建账号' }}</button></div></form></div>
     <div v-if="showPreview" class="modal-backdrop image-preview-backdrop" @click.self="closePreview"><div class="image-preview-modal"><div class="modal-header"><div><p class="eyebrow">ATTACHMENT PREVIEW</p><h2>{{ previewAttachmentItem?.originalName }}</h2></div><button type="button" class="close-button" @click="closePreview">×</button></div><div v-if="previewLoading" class="image-preview-loading">正在读取图片…</div><img v-else-if="previewUrl" :src="previewUrl" :alt="previewAttachmentItem?.originalName" class="image-preview" /><p v-if="previewAttachmentItem" class="image-preview-meta">{{ formatFileSize(previewAttachmentItem.sizeBytes) }} · {{ formatDate(previewAttachmentItem.createdAt) }}</p></div></div>
     <div v-if="showPasswordModal" class="modal-backdrop" @click.self="showPasswordModal = false"><form class="modal-card" @submit.prevent="changePassword"><div class="modal-header"><div><p class="eyebrow">ACCOUNT SECURITY</p><h2>修改登录密码</h2><small class="detail-ticket-no">修改后当前登录会失效</small></div><button type="button" class="close-button" @click="showPasswordModal = false">×</button></div><label>当前密码<input v-model="passwordForm.currentPassword" required type="password" autocomplete="current-password" /></label><label>新密码<input v-model="passwordForm.newPassword" required minlength="10" maxlength="72" type="password" autocomplete="new-password" placeholder="至少 10 位" /></label><div class="modal-actions"><button type="button" class="secondary-button" @click="showPasswordModal = false">取消</button><button class="primary-button" :disabled="changingPassword">{{ changingPassword ? '更新中…' : '更新密码' }}</button></div></form></div>
