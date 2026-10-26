@@ -21,6 +21,7 @@
 - 用户角色模型和租户字段
 - 工单创建、分页查询、详情查询
 - 工单状态机流转与乐观锁版本字段
+- 解决方案与用户验收闭环：处理人必须提交解决类型、解决摘要和验证证据后才能请求确认；只有原申请人可确认解决或带原因退回，列表快捷操作、批量更新和通用状态接口均不能绕过验收，全部动作写入审计链路
 - 工单按 tenantId 隔离查询
 - 知识库草稿、发布、归档状态模型；AGENT/ADMIN 可编辑、发布、归档和恢复，按租户隔离并记录审计；支持分类/状态筛选、全文阅读、阅读量统计、文章版本历史、用户帮助度反馈和知识库运营分析看板
 - 知识库按关键词和分类检索
@@ -229,7 +230,12 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
     POST   /api/v1/support-groups/{id}/tickets/{ticketId}      # AGENT/ADMIN
     DELETE /api/v1/support-groups/{id}/tickets/{ticketId}      # AGENT/ADMIN
 
-服务评价：客服将工单流转为 `RESOLVED` 后，系统自动向申请人发送评价邀请。申请人从侧边栏“服务评价”选择星级、体验标签和可选意见；AGENT/ADMIN 在同一页面查看按周期聚合的 CSAT 看板。每张工单仅允许原申请人评价一次，处理人和支持组在提交时固化为历史快照。
+解决方案验收：客服在处理中的工单详情提交结构化解决包，系统进入 `WAITING_CONFIRMATION`；原申请人可确认解决，或填写仍未解决的原因退回处理。两个动作由专用接口原子完成，避免评论已经写入而状态流转失败。
+
+    POST /api/v1/tickets/{id}/resolution/submit               # AGENT/ADMIN 提交解决包
+    POST /api/v1/tickets/{id}/resolution/decision             # 原申请人确认或退回
+
+服务评价：原申请人确认解决并使工单进入 `RESOLVED` 后，系统自动发送评价邀请。申请人从侧边栏“服务评价”选择星级、体验标签和可选意见；AGENT/ADMIN 在同一页面查看按周期聚合的 CSAT 看板。每张工单仅允许原申请人评价一次，处理人和支持组在提交时固化为历史快照。
 
     GET  /api/v1/satisfaction/my-surveys                      # 当前用户可评价及已评价工单
     POST /api/v1/satisfaction/tickets/{ticketId}               # 原申请人提交一次评价

@@ -10,14 +10,15 @@ import {
 test('staff actions mirror backend ticket transitions', () => {
   assert.deepEqual(ticketActions('OPEN', true).map(action => action.target), ['IN_PROGRESS', 'REJECTED'])
   assert.deepEqual(ticketActions('IN_PROGRESS', true).map(action => action.target), ['WAITING_CONFIRMATION', 'REJECTED'])
-  assert.deepEqual(ticketActions('WAITING_CONFIRMATION', true).map(action => action.target), ['IN_PROGRESS', 'RESOLVED'])
+  assert.deepEqual(ticketActions('WAITING_CONFIRMATION', true).map(action => action.target), ['IN_PROGRESS'])
   assert.deepEqual(ticketActions('RESOLVED', true).map(action => action.target), ['IN_PROGRESS', 'CLOSED'])
   assert.deepEqual(ticketActions('CLOSED', true), [])
 })
 
 test('requesters only receive confirmation actions', () => {
   assert.deepEqual(ticketActions('OPEN', false), [])
-  assert.deepEqual(ticketActions('WAITING_CONFIRMATION', false).map(action => action.target), ['RESOLVED'])
+  assert.deepEqual(ticketActions('WAITING_CONFIRMATION', false).map(action => action.target), ['IN_PROGRESS', 'RESOLVED'])
+  assert.equal(ticketActions('WAITING_CONFIRMATION', false)[0].decision, 'REOPEN')
   assert.deepEqual(ticketActions('RESOLVED', false).map(action => action.target), ['CLOSED'])
 })
 

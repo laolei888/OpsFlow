@@ -23,6 +23,11 @@ public class Ticket {
     private String impactScope;
     private String expectedOutcome;
     private String attemptedActions;
+    private TicketResolutionCode resolutionCode;
+    private String resolutionSummary;
+    private String verificationResult;
+    private LocalDateTime resolutionSubmittedAt;
+    private LocalDateTime confirmedAt;
     private String category;
     private TicketPriority priority;
     private TicketStatus status;

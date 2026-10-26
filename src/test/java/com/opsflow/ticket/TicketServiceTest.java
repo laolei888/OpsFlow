@@ -194,6 +194,77 @@ class TicketServiceTest {
     }
 
     @Test
+    void requiresResolutionPackageBeforeWaitingForConfirmation() {
+        Ticket ticket = ticket(TicketStatus.IN_PROGRESS);
+        when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
+
+        assertThrows(RuntimeException.class,
+                () -> ticketService.transition(1L, TicketStatus.WAITING_CONFIRMATION, 9L, 3L));
+
+        verify(ticketMapper, never()).updateById(any(Ticket.class));
+    }
+
+    @Test
+    void submitsResolutionAndMovesTicketToConfirmation() {
+        Ticket ticket = ticket(TicketStatus.IN_PROGRESS);
+        ticket.setRequesterId(7L);
+        ticket.setTicketNo("OPF-RES-001");
+        when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
+        when(ticketMapper.updateById(ticket)).thenReturn(1);
+
+        Ticket submitted = ticketService.submitResolution(1L, TicketResolutionCode.FIXED,
+                "修复 VPN 网关路由配置", "申请人测试访问成功，监控指标恢复", 9L, 3L);
+
+        assertEquals(TicketStatus.WAITING_CONFIRMATION, submitted.getStatus());
+        assertEquals(TicketResolutionCode.FIXED, submitted.getResolutionCode());
+        assertEquals("修复 VPN 网关路由配置", submitted.getResolutionSummary());
+        assertNotNull(submitted.getResolutionSubmittedAt());
+        verify(auditLogService).record(eq(3L), eq(9L), eq("TICKET"), eq(1L),
+                eq("RESOLUTION_SUBMITTED"), any(), any(), any());
+    }
+
+    @Test
+    void requesterCanReopenRejectedResolutionWithReason() {
+        Ticket ticket = ticket(TicketStatus.WAITING_CONFIRMATION);
+        ticket.setRequesterId(7L);
+        ticket.setTicketNo("OPF-RES-002");
+        ticket.setResolutionSummary("已恢复主要功能");
+        when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
+        when(ticketMapper.updateById(ticket)).thenReturn(1);
+
+        Ticket reopened = ticketService.decideResolution(1L, TicketResolutionDecision.REOPEN,
+                "导出功能仍然报错", 7L, 3L);
+
+        assertEquals(TicketStatus.IN_PROGRESS, reopened.getStatus());
+        verify(auditLogService).record(eq(3L), eq(7L), eq("TICKET"), eq(1L),
+                eq("RESOLUTION_REOPENED"), any(), any(), eq("申请人反馈仍未解决：导出功能仍然报错"));
+    }
+
+    @Test
+    void reopenDecisionRequiresReason() {
+        Ticket ticket = ticket(TicketStatus.WAITING_CONFIRMATION);
+        ticket.setRequesterId(7L);
+        when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
+
+        assertThrows(RuntimeException.class,
+                () -> ticketService.decideResolution(1L, TicketResolutionDecision.REOPEN, " ", 7L, 3L));
+
+        verify(ticketMapper, never()).updateById(any(Ticket.class));
+    }
+
+    @Test
+    void onlyOriginalRequesterCanDecideResolution() {
+        Ticket ticket = ticket(TicketStatus.WAITING_CONFIRMATION);
+        ticket.setRequesterId(7L);
+        when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
+
+        assertThrows(RuntimeException.class,
+                () -> ticketService.decideResolution(1L, TicketResolutionDecision.CONFIRM, null, 8L, 3L));
+
+        verify(ticketMapper, never()).updateById(any(Ticket.class));
+    }
+
+    @Test
     void requestsSatisfactionWhenTicketIsResolved() {
         Ticket ticket = ticket(TicketStatus.WAITING_CONFIRMATION);
         ticket.setRequesterId(7L);
@@ -201,7 +272,8 @@ class TicketServiceTest {
         when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
         when(ticketMapper.updateById(ticket)).thenReturn(1);
 
-        Ticket resolved = ticketService.transition(1L, TicketStatus.RESOLVED, 9L, 3L);
+        Ticket resolved = ticketService.decideResolution(
+                1L, TicketResolutionDecision.CONFIRM, null, 7L, 3L);
 
         assertEquals(TicketStatus.RESOLVED, resolved.getStatus());
         verify(notificationPublisher).enqueue(3L, 7L, 1L,

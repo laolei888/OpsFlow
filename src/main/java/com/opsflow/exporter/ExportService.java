@@ -42,7 +42,12 @@ public class ExportService {
             new TicketExportColumn("description", "描述", Ticket::getDescription),
             new TicketExportColumn("impactScope", "影响范围", Ticket::getImpactScope),
             new TicketExportColumn("expectedOutcome", "期望结果", Ticket::getExpectedOutcome),
-            new TicketExportColumn("attemptedActions", "已尝试措施", Ticket::getAttemptedActions)
+            new TicketExportColumn("attemptedActions", "已尝试措施", Ticket::getAttemptedActions),
+            new TicketExportColumn("resolutionCode", "解决类型", Ticket::getResolutionCode),
+            new TicketExportColumn("resolutionSummary", "解决摘要", Ticket::getResolutionSummary),
+            new TicketExportColumn("verificationResult", "验证结果", Ticket::getVerificationResult),
+            new TicketExportColumn("resolutionSubmittedAt", "方案提交时间", Ticket::getResolutionSubmittedAt),
+            new TicketExportColumn("confirmedAt", "申请人确认时间", Ticket::getConfirmedAt)
     );
 
     private final TicketService ticketService;

@@ -73,7 +73,9 @@ public class TicketService {
                     .or().like(Ticket::getDescription, search)
                     .or().like(Ticket::getImpactScope, search)
                     .or().like(Ticket::getExpectedOutcome, search)
-                    .or().like(Ticket::getAttemptedActions, search));
+                    .or().like(Ticket::getAttemptedActions, search)
+                    .or().like(Ticket::getResolutionSummary, search)
+                    .or().like(Ticket::getVerificationResult, search));
         }
         if (overdue) {
             query.in(Ticket::getStatus, TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CONFIRMATION)
@@ -132,7 +134,9 @@ public class TicketService {
                     .or().like(Ticket::getDescription, search)
                     .or().like(Ticket::getImpactScope, search)
                     .or().like(Ticket::getExpectedOutcome, search)
-                    .or().like(Ticket::getAttemptedActions, search));
+                    .or().like(Ticket::getAttemptedActions, search)
+                    .or().like(Ticket::getResolutionSummary, search)
+                    .or().like(Ticket::getVerificationResult, search));
         }
         if (overdue) {
             query.in(Ticket::getStatus, TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CONFIRMATION)
@@ -336,6 +340,13 @@ public class TicketService {
                 throw new BusinessException("工单 " + ticket.getTicketNo() + " 不允许从 "
                         + beforeStatus + " 流转到 " + targetStatus);
             }
+            if (statusChanged && beforeStatus == TicketStatus.IN_PROGRESS
+                    && targetStatus == TicketStatus.WAITING_CONFIRMATION) {
+                throw new BusinessException("工单 " + ticket.getTicketNo() + " 需要先提交解决方案和验证结果");
+            }
+            if (statusChanged && targetStatus == TicketStatus.RESOLVED) {
+                throw new BusinessException("工单 " + ticket.getTicketNo() + " 需要由申请人逐项验收解决方案");
+            }
 
             if (statusChanged) ticket.setStatus(targetStatus);
             if (priorityChanged) ticket.setPriority(targetPriority);
@@ -368,7 +379,14 @@ public class TicketService {
         if (!isAllowed(beforeStatus, target)) {
             throw new BusinessException("不允许从 " + beforeStatus + " 流转到 " + target);
         }
+        if (beforeStatus == TicketStatus.IN_PROGRESS && target == TicketStatus.WAITING_CONFIRMATION) {
+            throw new BusinessException("请提交解决方案和验证结果后再请求用户确认");
+        }
+        if (beforeStatus == TicketStatus.WAITING_CONFIRMATION && target == TicketStatus.RESOLVED) {
+            throw new BusinessException("解决方案必须由工单申请人确认");
+        }
         ticket.setStatus(target);
+        if (target == TicketStatus.RESOLVED) ticket.setConfirmedAt(LocalDateTime.now());
         ticket.setUpdatedAt(LocalDateTime.now());
         if (ticketMapper.updateById(ticket) == 0) {
             throw new BusinessException("工单已被其他人更新，请刷新后重试");
@@ -376,6 +394,73 @@ public class TicketService {
         auditLogService.record(tenantId, actorId, "TICKET", ticket.getId(), "STATUS_CHANGED",
                 Map.of("status", beforeStatus.name()), Map.of("status", target.name()),
                 "工单状态从 " + beforeStatus + " 流转到 " + target);
+        queueStatusChanged(ticket, beforeStatus, target, actorId);
+        if (target == TicketStatus.RESOLVED) requestSatisfaction(ticket);
+        return ticket;
+    }
+
+    @Transactional
+    public Ticket submitResolution(Long id, TicketResolutionCode resolutionCode, String resolutionSummary,
+                                   String verificationResult, Long actorId, Long tenantId) {
+        Ticket ticket = get(id, tenantId);
+        if (ticket.getStatus() != TicketStatus.IN_PROGRESS) {
+            throw new BusinessException("只有处理中的工单可以提交解决方案");
+        }
+        if (resolutionCode == null) throw new BusinessException("请选择解决类型");
+        String normalizedSummary = requiredText(resolutionSummary, "解决摘要", 10000);
+        String normalizedVerification = requiredText(verificationResult, "验证结果", 2000);
+        TicketStatus beforeStatus = ticket.getStatus();
+        Map<String, Object> before = resolutionSnapshot(ticket);
+        LocalDateTime now = LocalDateTime.now();
+        ticket.setResolutionCode(resolutionCode);
+        ticket.setResolutionSummary(normalizedSummary);
+        ticket.setVerificationResult(normalizedVerification);
+        ticket.setResolutionSubmittedAt(now);
+        ticket.setConfirmedAt(null);
+        ticket.setStatus(TicketStatus.WAITING_CONFIRMATION);
+        ticket.setUpdatedAt(now);
+        if (ticketMapper.updateById(ticket) == 0) {
+            throw new BusinessException("工单已被其他人更新，请刷新后重试");
+        }
+        auditLogService.record(tenantId, actorId, "TICKET", ticket.getId(), "RESOLUTION_SUBMITTED",
+                before, resolutionSnapshot(ticket), "提交解决方案并请求申请人确认");
+        queueStatusChanged(ticket, beforeStatus, TicketStatus.WAITING_CONFIRMATION, actorId);
+        return ticket;
+    }
+
+    @Transactional
+    public Ticket decideResolution(Long id, TicketResolutionDecision decision, String comment,
+                                   Long actorId, Long tenantId) {
+        Ticket ticket = get(id, tenantId);
+        if (ticket.getRequesterId() == null || !ticket.getRequesterId().equals(actorId)) {
+            throw new BusinessException("只有工单申请人可以验收解决方案");
+        }
+        if (ticket.getStatus() != TicketStatus.WAITING_CONFIRMATION) {
+            throw new BusinessException("当前工单不在待确认状态");
+        }
+        if (decision == null) throw new BusinessException("请选择验收结果");
+        String normalizedComment = optionalText(comment, "验收说明", 1000);
+        if (decision == TicketResolutionDecision.REOPEN && normalizedComment == null) {
+            throw new BusinessException("退回处理时必须说明仍未解决的原因");
+        }
+        TicketStatus beforeStatus = ticket.getStatus();
+        Map<String, Object> before = resolutionSnapshot(ticket);
+        LocalDateTime now = LocalDateTime.now();
+        TicketStatus target = decision == TicketResolutionDecision.CONFIRM
+                ? TicketStatus.RESOLVED : TicketStatus.IN_PROGRESS;
+        ticket.setStatus(target);
+        ticket.setConfirmedAt(decision == TicketResolutionDecision.CONFIRM ? now : null);
+        ticket.setUpdatedAt(now);
+        if (ticketMapper.updateById(ticket) == 0) {
+            throw new BusinessException("工单已被其他人更新，请刷新后重试");
+        }
+        String action = decision == TicketResolutionDecision.CONFIRM
+                ? "RESOLUTION_CONFIRMED" : "RESOLUTION_REOPENED";
+        String detail = decision == TicketResolutionDecision.CONFIRM
+                ? (normalizedComment == null ? "申请人确认问题已经解决" : "申请人确认解决：" + normalizedComment)
+                : "申请人反馈仍未解决：" + normalizedComment;
+        auditLogService.record(tenantId, actorId, "TICKET", ticket.getId(), action,
+                before, resolutionSnapshot(ticket), detail);
         queueStatusChanged(ticket, beforeStatus, target, actorId);
         if (target == TicketStatus.RESOLVED) requestSatisfaction(ticket);
         return ticket;
@@ -498,6 +583,17 @@ public class TicketService {
         snapshot.put("attemptedActions", ticket.getAttemptedActions());
         snapshot.put("category", ticket.getCategory());
         snapshot.put("priority", ticket.getPriority() == null ? null : ticket.getPriority().name());
+        return snapshot;
+    }
+
+    private Map<String, Object> resolutionSnapshot(Ticket ticket) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("status", ticket.getStatus() == null ? null : ticket.getStatus().name());
+        snapshot.put("resolutionCode", ticket.getResolutionCode() == null ? null : ticket.getResolutionCode().name());
+        snapshot.put("resolutionSummary", ticket.getResolutionSummary());
+        snapshot.put("verificationResult", ticket.getVerificationResult());
+        snapshot.put("resolutionSubmittedAt", ticket.getResolutionSubmittedAt());
+        snapshot.put("confirmedAt", ticket.getConfirmedAt());
         return snapshot;
     }
 

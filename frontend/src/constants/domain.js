@@ -1,5 +1,6 @@
 export const statusLabels = Object.freeze({ OPEN: '待处理', IN_PROGRESS: '处理中', WAITING_CONFIRMATION: '待确认', RESOLVED: '已解决', CLOSED: '已关闭', REJECTED: '已驳回' })
 export const priorityLabels = Object.freeze({ LOW: '低', MEDIUM: '中', HIGH: '高', URGENT: '紧急' })
+export const resolutionCodeLabels = Object.freeze({ FIXED: '已彻底修复', WORKAROUND: '已提供临时方案', USER_GUIDANCE: '已指导用户处理', NO_FAULT_FOUND: '未发现系统故障', DUPLICATE: '重复问题' })
 export const articleStatusLabels = Object.freeze({ DRAFT: '草稿', PUBLISHED: '已发布', ARCHIVED: '已归档' })
 export const serviceRequestStatusLabels = Object.freeze({ PENDING_APPROVAL: '待审批', APPROVED: '已通过', REJECTED: '已驳回' })
 export const changeTypeLabels = Object.freeze({ STANDARD: '标准', NORMAL: '普通', EMERGENCY: '紧急' })

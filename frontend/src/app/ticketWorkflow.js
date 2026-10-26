@@ -12,12 +12,11 @@ const STAFF_ACTIONS = Object.freeze({
     Object.freeze({ target: 'REJECTED', label: '驳回工单', tone: 'danger', confirm: true })
   ]),
   IN_PROGRESS: Object.freeze([
-    Object.freeze({ target: 'WAITING_CONFIRMATION', label: '请求用户确认', tone: 'primary' }),
+    Object.freeze({ target: 'WAITING_CONFIRMATION', label: '提交解决方案', tone: 'primary', resolution: true }),
     Object.freeze({ target: 'REJECTED', label: '驳回工单', tone: 'danger', confirm: true })
   ]),
   WAITING_CONFIRMATION: Object.freeze([
-    Object.freeze({ target: 'IN_PROGRESS', label: '撤回确认请求', tone: 'secondary' }),
-    Object.freeze({ target: 'RESOLVED', label: '确认解决', tone: 'primary' })
+    Object.freeze({ target: 'IN_PROGRESS', label: '撤回确认请求', tone: 'secondary' })
   ]),
   RESOLVED: Object.freeze([
     Object.freeze({ target: 'IN_PROGRESS', label: '重新打开', tone: 'secondary', confirm: true }),
@@ -27,7 +26,8 @@ const STAFF_ACTIONS = Object.freeze({
 
 const REQUESTER_ACTIONS = Object.freeze({
   WAITING_CONFIRMATION: Object.freeze([
-    Object.freeze({ target: 'RESOLVED', label: '确认已解决', tone: 'primary' })
+    Object.freeze({ target: 'IN_PROGRESS', label: '仍有问题', tone: 'secondary', confirm: true, decision: 'REOPEN' }),
+    Object.freeze({ target: 'RESOLVED', label: '确认已解决', tone: 'primary', decision: 'CONFIRM' })
   ]),
   RESOLVED: Object.freeze([
     Object.freeze({ target: 'CLOSED', label: '确认关闭', tone: 'primary' })

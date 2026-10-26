@@ -88,8 +88,37 @@ public class TicketController {
             if (!requesterConfirmation && !requesterClosure) {
                 throw new BusinessException("申请人只能确认解决或关闭自己的工单");
             }
+            if (requesterConfirmation) {
+                return ApiResponse.ok(ticketService.decideResolution(id, TicketResolutionDecision.CONFIRM,
+                        null, principal.id(), principal.tenantId()), "工单状态更新成功");
+            }
         }
         return ApiResponse.ok(ticketService.transition(id, target, principal.id(), principal.tenantId()), "工单状态更新成功");
+    }
+
+    @PostMapping("/{id}/resolution/submit")
+    public ApiResponse<Ticket> submitResolution(@PathVariable Long id,
+                                                 @Valid @RequestBody SubmitResolutionRequest request,
+                                                 @AuthenticationPrincipal AuthPrincipal principal) {
+        if (!principal.hasAnyRole("AGENT", "ADMIN")) {
+            throw new BusinessException("只有客服或管理员可以提交解决方案");
+        }
+        return ApiResponse.ok(ticketService.submitResolution(id, request.resolutionCode(),
+                        request.resolutionSummary(), request.verificationResult(), principal.id(), principal.tenantId()),
+                "解决方案已提交，等待申请人确认");
+    }
+
+    @PostMapping("/{id}/resolution/decision")
+    public ApiResponse<Ticket> decideResolution(@PathVariable Long id,
+                                                 @Valid @RequestBody ResolutionDecisionRequest request,
+                                                 @AuthenticationPrincipal AuthPrincipal principal) {
+        if (principal.hasAnyRole("AGENT", "ADMIN")) {
+            throw new BusinessException("解决方案需要由工单申请人确认");
+        }
+        ticketService.getVisible(id, principal.tenantId(), principal.id());
+        return ApiResponse.ok(ticketService.decideResolution(id, request.decision(), request.comment(),
+                        principal.id(), principal.tenantId()),
+                request.decision() == TicketResolutionDecision.CONFIRM ? "解决方案已确认" : "工单已退回处理中");
     }
 
     @PostMapping("/{id}/claim")
@@ -172,4 +201,13 @@ public class TicketController {
                                      TicketStatus targetStatus, TicketPriority priority) { }
 
     public record AssignRequest(@NotNull Long assigneeId) { }
+
+    public record SubmitResolutionRequest(
+            @NotNull TicketResolutionCode resolutionCode,
+            @NotBlank @Size(max = 10000) String resolutionSummary,
+            @NotBlank @Size(max = 2000) String verificationResult) { }
+
+    public record ResolutionDecisionRequest(
+            @NotNull TicketResolutionDecision decision,
+            @Size(max = 1000) String comment) { }
 }

@@ -66,11 +66,26 @@ class TicketControllerTest {
     void requesterCanConfirmResolvedTicket() {
         Ticket ticket = ticket(TicketStatus.WAITING_CONFIRMATION);
         when(ticketService.getVisible(1L, 3L, 7L)).thenReturn(ticket);
-        when(ticketService.transition(1L, TicketStatus.RESOLVED, 7L, 3L)).thenReturn(ticket);
+        when(ticketService.decideResolution(1L, TicketResolutionDecision.CONFIRM, null, 7L, 3L))
+                .thenReturn(ticket);
 
         controller.transition(1L, TicketStatus.RESOLVED, requester());
 
-        verify(ticketService).transition(1L, TicketStatus.RESOLVED, 7L, 3L);
+        verify(ticketService).decideResolution(1L, TicketResolutionDecision.CONFIRM, null, 7L, 3L);
+    }
+
+    @Test
+    void requesterCanReturnResolutionThroughDecisionEndpoint() {
+        Ticket ticket = ticket(TicketStatus.WAITING_CONFIRMATION);
+        when(ticketService.getVisible(1L, 3L, 7L)).thenReturn(ticket);
+        when(ticketService.decideResolution(1L, TicketResolutionDecision.REOPEN,
+                "问题仍然存在", 7L, 3L)).thenReturn(ticket);
+
+        controller.decideResolution(1L, new TicketController.ResolutionDecisionRequest(
+                TicketResolutionDecision.REOPEN, "问题仍然存在"), requester());
+
+        verify(ticketService).decideResolution(1L, TicketResolutionDecision.REOPEN,
+                "问题仍然存在", 7L, 3L);
     }
 
     @Test
