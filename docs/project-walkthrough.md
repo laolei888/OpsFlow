@@ -10,7 +10,7 @@ OpsFlow 是面向企业 IT 服务管理场景的工单与知识协同平台，�
 - 数据与消息：MySQL 8.4、Redis 7.4、RabbitMQ 4.2、Transactional Outbox
 - 文件与安全：本地/S3 兼容对象存储、RustFS、ClamAV、HMAC-SHA256
 - 可观测性：Actuator、Micrometer、OpenTelemetry、Prometheus、Grafana、Loki、Tempo
-- 前端：Vue 3、Vite、Element Plus、Axios
+- 前端：Vue 3、Vite、Vue Router、Pinia、Fetch API、CSS Design Tokens
 - 工程化：Docker Compose、GitHub Actions、Trivy、SBOM、镜像签名与来源证明
 
 ## 主要后端模块

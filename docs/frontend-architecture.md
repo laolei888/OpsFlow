@@ -1,0 +1,35 @@
+# 前端架构说明
+
+OpsFlow 前端采用 Vue 3 + Vite，并以渐进方式从单文件工作台演进为模块化应用。第一轮重构先稳定路由、会话、权限、请求和布局边界，后续业务页面按同一边界继续拆分。
+
+## 目录职责
+
+- `src/app/`：页面元数据和导航配置。
+- `src/router/`：Hash 路由和角色访问守卫，避免服务端额外配置 SPA 回退。
+- `src/stores/`：Pinia 全局状态；当前集中管理登录会话。
+- `src/services/`：统一 HTTP、鉴权、追踪编号和文件下载处理。
+- `src/composables/`：可复用权限判断等组合逻辑。
+- `src/constants/`：领域状态与中文显示字典。
+- `src/components/common/`：错误、提示、状态等无业务组件。
+- `src/components/layout/`：侧栏和顶部栏等应用骨架。
+- `src/views/`：路由级页面；登录页已经独立，其他页面按后续重构计划迁移。
+
+## 路由约定
+
+登录后的工作区使用 Hash 路由，例如 `/#/tickets`。这样开发环境和 Spring Boot 静态资源部署都可直接刷新，不依赖 Web Server 增加回退规则。`/status` 和 `/sso/callback` 仍由后端控制器转发到前端入口。
+
+路由元数据使用 `authenticated`、`staff`、`admin` 三种访问级别。菜单会按权限过滤，路由守卫同时阻止手动输入越权地址；后端 RBAC 仍是最终安全边界。
+
+## 请求约定
+
+业务组件通过统一 `request(path, options)` 调用后端：
+
+1. 自动附加 JWT。
+2. JSON 请求自动设置内容类型，`FormData` 保留浏览器生成的 boundary。
+3. 401/403 清理会话。
+4. 错误信息附带 `X-Trace-Id` 或 `X-Request-Id`，便于定位后端日志。
+5. CSV 等文件下载复用统一鉴权和错误处理。
+
+## 后续拆分规则
+
+每个路由级业务页面应只负责页面编排；API 调用进入 `services/`，跨页面状态进入 `stores/`，领域标签进入 `constants/`，可复用交互进入 `components/common/`。禁止继续向根 `App.vue` 增加新的完整业务模块。

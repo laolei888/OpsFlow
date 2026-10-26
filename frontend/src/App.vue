@@ -1,5 +1,24 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
+import { VIEW_META, viewPath } from './app/navigation'
+import AppSidebar from './components/layout/AppSidebar.vue'
+import AppTopbar from './components/layout/AppTopbar.vue'
+import PageErrorBanner from './components/common/PageErrorBanner.vue'
+import ToastMessage from './components/common/ToastMessage.vue'
+import LoginView from './views/LoginView.vue'
+import { useSessionStore } from './stores/session'
+import { usePermissions } from './composables/usePermissions'
+import { createHttpClient } from './services/http'
+import {
+  articleStatusLabels, articleVersionChangeLabels, assetCriticalityLabels, assetEnvironmentLabels,
+  assetRelationLabels, assetStatusLabels, assetTypeLabels, attachmentScanStatusLabels,
+  changeRiskLabels, changeStatusLabels, changeTaskStatusLabels, changeTypeLabels,
+  priorityLabels, problemChangeLinkLabels, problemPriorityLabels, problemStatusLabels,
+  problemTaskStatusLabels, problemTicketLinkLabels, reportRangeOptions, serviceRequestStatusLabels,
+  statusLabels, ticketSortLabels, ticketSortOptions, webhookOutboxStatusLabels, webhookStatusLabels
+} from './constants/domain'
 
 const AlertCenter = defineAsyncComponent(() => import('./components/AlertCenter.vue'))
 const AttachmentSecurityCenter = defineAsyncComponent(() => import('./components/AttachmentSecurityCenter.vue'))
@@ -22,14 +41,18 @@ const SupportGroupCenter = defineAsyncComponent(() => import('./components/Suppo
 const CustomerSatisfactionCenter = defineAsyncComponent(() => import('./components/CustomerSatisfactionCenter.vue'))
 const IdentityAccessCenter = defineAsyncComponent(() => import('./components/IdentityAccessCenter.vue'))
 
-const TOKEN_KEY = 'opsflow_token'
-const USER_KEY = 'opsflow_user'
-const token = ref(localStorage.getItem(TOKEN_KEY) || '')
-const user = ref(JSON.parse(localStorage.getItem(USER_KEY) || 'null'))
+const route = useRoute()
+const router = useRouter()
+const session = useSessionStore()
+const { token, user, displayName } = storeToRefs(session)
+const { isAdmin, isStaff: canBulkUpdate } = usePermissions(user)
+const httpClient = createHttpClient({ getToken: () => token.value, onUnauthorized: logout })
+const api = (path, options) => httpClient.request(path, options)
+const downloadCsv = (path, filename) => httpClient.download(path, filename)
 const ssoProviders = ref([])
 const ssoLoading = ref(false)
 const isPublicStatusPage = window.location.pathname === '/status'
-const activeView = ref('overview')
+const activeView = ref(route.meta.view || 'overview')
 const globalSearchRef = ref(null)
 const loading = ref(false)
 const error = ref('')
@@ -266,46 +289,10 @@ const automationForm = reactive({
 })
 const passwordForm = reactive({ currentPassword: '', newPassword: '' })
 
-const loginForm = reactive({ username: '', password: '' })
 const ticketForm = reactive({ title: '', description: '', category: '网络', priority: 'MEDIUM' })
 const ticketEditForm = reactive({ title: '', description: '', category: '', priority: 'MEDIUM' })
 const articleForm = reactive({ title: '', slug: '', category: '网络', content: '' })
 
-const statusLabels = { OPEN: '待处理', IN_PROGRESS: '处理中', WAITING_CONFIRMATION: '待确认', RESOLVED: '已解决', CLOSED: '已关闭', REJECTED: '已驳回' }
-const priorityLabels = { LOW: '低', MEDIUM: '中', HIGH: '高', URGENT: '紧急' }
-const articleStatusLabels = { DRAFT: '草稿', PUBLISHED: '已发布', ARCHIVED: '已归档' }
-const serviceRequestStatusLabels = { PENDING_APPROVAL: '待审批', APPROVED: '已通过', REJECTED: '已驳回' }
-const changeTypeLabels = { STANDARD: '标准', NORMAL: '普通', EMERGENCY: '紧急' }
-const changeRiskLabels = { LOW: '低', MEDIUM: '中', HIGH: '高', CRITICAL: '严重' }
-const changeStatusLabels = { DRAFT: '草稿', PENDING_APPROVAL: '待审批', APPROVED: '已批准', REJECTED: '已驳回', IN_PROGRESS: '实施中', COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消' }
-const changeTaskStatusLabels = { TODO: '待执行', IN_PROGRESS: '执行中', DONE: '已完成' }
-const problemPriorityLabels = { LOW: '低', MEDIUM: '中', HIGH: '高', CRITICAL: '严重' }
-const problemStatusLabels = { OPEN: '待分析', INVESTIGATING: '分析中', KNOWN_ERROR: '已知错误', PENDING_CHANGE: '等待变更', RESOLVED: '已解决', CLOSED: '已关闭', CANCELLED: '已取消' }
-const problemTaskStatusLabels = { TODO: '待执行', IN_PROGRESS: '执行中', DONE: '已完成' }
-const webhookStatusLabels = { PENDING: '待发送', RETRYING: '重试中', DELIVERED: '已送达', DEAD: '死信' }
-const webhookOutboxStatusLabels = { PENDING: '待展开', PROCESSING: '处理中', PUBLISHED: '已展开', FAILED: '待重试', DEAD: '死信' }
-const attachmentScanStatusLabels = { PENDING: '等待扫描', SCANNING: '扫描中', CLEAN: '安全', INFECTED: '已隔离', FAILED: '扫描失败', RELEASED: '人工放行' }
-const problemTicketLinkLabels = { SYMPTOM: '症状工单', RELATED: '相关工单' }
-const problemChangeLinkLabels = { REMEDIATION: '修复变更', RELATED: '相关变更' }
-const assetTypeLabels = { BUSINESS_SERVICE: '业务服务', APPLICATION: '应用系统', SERVER: '服务器', DATABASE: '数据库', NETWORK: '网络设备', DEVICE: '终端设备', CLOUD_RESOURCE: '云资源', OTHER: '其他' }
-const assetEnvironmentLabels = { PRODUCTION: '生产', STAGING: '预发布', DEVELOPMENT: '开发', TEST: '测试' }
-const assetStatusLabels = { ACTIVE: '运行中', MAINTENANCE: '维护中', RETIRED: '已退役' }
-const assetCriticalityLabels = { CRITICAL: '核心', HIGH: '高', MEDIUM: '中', LOW: '低' }
-const assetRelationLabels = { DEPENDS_ON: '依赖', RUNS_ON: '运行于', CONNECTS_TO: '连接', BACKED_BY: '由…支撑', MONITORS: '监控' }
-const articleVersionChangeLabels = { CREATED: '创建文章', UPDATED: '编辑内容', PUBLISHED: '发布状态', ARCHIVED: '归档状态', RESTORED: '恢复状态', BACKFILL: '历史初始化', VERSION_RESTORED: '恢复历史版本' }
-const ticketSortLabels = { PRIORITY_DESC: '优先级最高', SLA_ASC: 'SLA 最近', UPDATED_DESC: '最近更新', CREATED_DESC: '最新创建', CREATED_ASC: '最早创建' }
-const ticketSortOptions = [
-  { value: 'PRIORITY_DESC', label: '优先级最高' },
-  { value: 'SLA_ASC', label: 'SLA 最近' },
-  { value: 'UPDATED_DESC', label: '最近更新' },
-  { value: 'CREATED_DESC', label: '最新创建' },
-  { value: 'CREATED_ASC', label: '最早创建' }
-]
-const reportRangeOptions = [
-  { value: 7, label: '近 7 天' },
-  { value: 14, label: '近 14 天' },
-  { value: 30, label: '近 30 天' }
-]
 const auditLabels = { CREATED: '创建工单', KNOWLEDGE_ARTICLE_CREATED: '创建知识文章', KNOWLEDGE_ARTICLE_UPDATED: '编辑知识文章', KNOWLEDGE_ARTICLE_PUBLISHED: '发布知识文章', KNOWLEDGE_ARTICLE_ARCHIVED: '归档知识文章', KNOWLEDGE_ARTICLE_RESTORED: '恢复知识文章', KNOWLEDGE_ARTICLE_VERSION_RESTORED: '恢复历史版本', TICKET_UPDATED: '编辑工单', STATUS_CHANGED: '状态流转', COMMENT_ADDED: '新增评论', BULK_UPDATED: '批量更新工单', ASSIGNED: '领取 / 指派', UNASSIGNED: '释放工单', ATTACHMENT_ADDED: '添加附件', ATTACHMENT_DELETED: '删除附件', ATTACHMENT_SCAN_CLEAN: '附件扫描通过', ATTACHMENT_SCAN_BLOCKED: '附件威胁隔离', ATTACHMENT_SCAN_FAILED: '附件扫描失败', ATTACHMENT_SCAN_RETRY: '附件重新扫描', ATTACHMENT_MANUALLY_RELEASED: '附件人工放行', USER_CREATED: '创建用户', USER_STATUS_CHANGED: '更新用户状态', USER_ROLE_CHANGED: '更新用户角色', PASSWORD_CHANGED: '修改密码', SLA_POLICY_UPDATED: '更新 SLA 策略', EXPORT_GENERATED: '导出数据', IMPORT_GENERATED: '批量导入', SAVED_VIEW_CREATED: '创建保存视图', SAVED_VIEW_UPDATED: '更新保存视图', SAVED_VIEW_DELETED: '删除保存视图', AUTOMATION_RULE_CREATED: '创建自动化规则', AUTOMATION_RULE_UPDATED: '更新自动化规则', AUTOMATION_RULE_TOGGLED: '切换自动化规则', AUTOMATION_RULE_DELETED: '删除自动化规则', AUTOMATION_APPLIED: '执行自动化规则', REPORT_SUBSCRIPTION_CREATED: '创建报表订阅', REPORT_SUBSCRIPTION_UPDATED: '更新报表订阅', REPORT_SUBSCRIPTION_DELETED: '删除报表订阅', REPORT_SUBSCRIPTION_RUN: '生成订阅报表', SERVICE_CATALOG_ITEM_CREATED: '创建服务目录项', SERVICE_CATALOG_ITEM_UPDATED: '更新服务目录项', SERVICE_CATALOG_ITEM_TOGGLED: '切换服务目录项', SERVICE_REQUEST_CREATED: '提交服务申请', SERVICE_REQUEST_AUTO_APPROVED: '自动受理服务申请', SERVICE_REQUEST_APPROVED: '通过服务审批', SERVICE_REQUEST_REJECTED: '驳回服务审批', CMDB_ASSET_CREATED: '登记配置项', CMDB_ASSET_UPDATED: '更新配置项', CMDB_RELATION_CREATED: '建立资产关系', CMDB_RELATION_DELETED: '解除资产关系', CMDB_ASSET_LINKED: '关联工单配置项', CMDB_ASSET_UNLINKED: '解除工单配置项', INCIDENT_DECLARED: '宣布重大事件', INCIDENT_UPDATED: '更新事件指挥资料', INCIDENT_STATUS_CHANGED: '重大事件状态流转', INCIDENT_UPDATE_ADDED: '发布事件动态', INCIDENT_TASK_CREATED: '新增事件协同任务', INCIDENT_TASK_UPDATED: '更新事件协同任务', INCIDENT_TICKET_LINKED: '关联事件工单', INCIDENT_TICKET_UNLINKED: '解除事件工单关联', INCIDENT_ASSET_LINKED: '关联受影响配置项', INCIDENT_ASSET_UNLINKED: '解除事件配置项关联', ONCALL_SCHEDULE_CREATED: '创建值班表', ONCALL_SCHEDULE_UPDATED: '更新值班表', ONCALL_SHIFT_CREATED: '创建值班轮班', ONCALL_SHIFT_UPDATED: '更新值班轮班', ONCALL_SHIFT_DELETED: '删除值班轮班', ONCALL_POLICY_CREATED: '创建升级策略', ONCALL_POLICY_UPDATED: '更新升级策略', ONCALL_ESCALATION_STEP_CREATED: '新增升级步骤', ONCALL_ESCALATION_STEP_UPDATED: '更新升级步骤', ONCALL_ESCALATION_STEP_DELETED: '删除升级步骤', ONCALL_ESCALATION_TRIGGERED: '触发值班升级', ONCALL_ESCALATION_DISPATCHED: '派发值班升级通知', ONCALL_ESCALATION_RESOLVED: '停止值班升级', ONCALL_ESCALATION_CANCELLED: '取消值班升级' }
 Object.assign(auditLabels, {
   ALERT_SOURCE_CREATED: '创建告警源', ALERT_SOURCE_UPDATED: '更新告警源', ALERT_SOURCE_KEY_ROTATED: '轮换告警密钥',
@@ -484,9 +471,6 @@ const nextStatus = { OPEN: 'IN_PROGRESS', IN_PROGRESS: 'WAITING_CONFIRMATION', W
 function canAdvanceTicket(ticket) {
   return canBulkUpdate.value || ['WAITING_CONFIRMATION', 'RESOLVED'].includes(ticket?.status)
 }
-const displayName = computed(() => user.value?.displayName || user.value?.username || '协作成员')
-const isAdmin = computed(() => (user.value?.roles || []).includes('ADMIN'))
-const canBulkUpdate = computed(() => (user.value?.roles || []).some(role => ['AGENT', 'ADMIN'].includes(role)))
 const canWriteInternal = canBulkUpdate
 const pendingServiceRequestCount = computed(() => serviceRequests.value.filter(item => item.status === 'PENDING_APPROVAL').length)
 const pendingChangeCount = computed(() => changes.value.filter(item => item.status === 'PENDING_APPROVAL').length)
@@ -494,6 +478,29 @@ const pendingProblemCount = computed(() => problems.value.filter(item => ['OPEN'
 const webhookEnabledCount = computed(() => webhooks.value.filter(item => item.enabled).length)
 const webhookPendingCount = computed(() => webhookDeliveries.value.filter(item => ['PENDING', 'RETRYING'].includes(item.delivery?.status)).length)
 const webhookDeadCount = computed(() => webhookDeliveries.value.filter(item => item.delivery?.status === 'DEAD').length)
+const sidebarCounts = computed(() => ({
+  ticketTotal: ticketTotal.value,
+  pendingServiceRequestCount: pendingServiceRequestCount.value,
+  pendingChangeCount: pendingChangeCount.value,
+  pendingProblemCount: pendingProblemCount.value,
+  cmdbAssetCount: cmdbAssets.value.length,
+  articleTotal: articleTotal.value,
+  webhookDeadCount: webhookDeadCount.value,
+  teamUserCount: teamUsers.value.length
+}))
+
+watch(() => route.meta.view, view => {
+  if (view && activeView.value !== view) activeView.value = view
+})
+
+watch(activeView, view => {
+  if (route.meta.view !== view) router.push(viewPath(view)).catch(() => {})
+})
+
+function navigateTo(view) {
+  if (view === 'team') openTeam()
+  else activeView.value = view
+}
 const webhookOutboxPendingCount = computed(() => Number(webhookOutboxSummary.value?.pending || 0)
   + Number(webhookOutboxSummary.value?.processing || 0) + Number(webhookOutboxSummary.value?.failed || 0))
 const webhookOutboxDeadCount = computed(() => Number(webhookOutboxSummary.value?.dead || 0))
@@ -555,8 +562,10 @@ const filteredCmdbAssets = computed(() => {
 const cmdbActiveCount = computed(() => cmdbAssets.value.filter(asset => asset.status === 'ACTIVE').length)
 const cmdbCriticalCount = computed(() => cmdbAssets.value.filter(asset => ['CRITICAL', 'HIGH'].includes(asset.criticality) && asset.status !== 'RETIRED').length)
 const availableTicketAssets = computed(() => cmdbAssets.value.filter(asset => asset.status !== 'RETIRED' && !ticketAssetLinks.value.some(link => String(link.assetId) === String(asset.id))))
-const pageEyebrow = computed(() => ({ overview: 'OVERVIEW', workbench: 'UNIFIED OPERATIONS', supportGroups: 'TEAM ROUTING', tickets: 'TICKETS', satisfaction: 'CUSTOMER SATISFACTION', catalog: 'SERVICE CATALOG', changes: 'CHANGE MANAGEMENT', releases: 'RELEASE GOVERNANCE', runbooks: 'RUNBOOK ORCHESTRATION', problems: 'PROBLEM MANAGEMENT', alerts: 'OBSERVABILITY ALERTS', reliability: 'RELIABILITY ENGINEERING', statusPage: 'SERVICE STATUS', incidents: 'INCIDENT COMMAND', postmortems: 'POST-INCIDENT REVIEW', oncall: 'ON-CALL & ESCALATION', cmdb: 'CONFIGURATION MANAGEMENT', messages: 'ASYNC MESSAGE OPERATIONS', attachmentSecurity: 'QUARANTINE & MALWARE DEFENSE', capacity: 'CAPACITY & RELEASE BASELINE', disasterRecovery: 'BACKUP & DISASTER RECOVERY', resilienceChaos: 'CONTROLLED CHAOS & SIGNED AGENTS', integrations: 'INTEGRATION CENTER', team: 'TEAM ADMIN', knowledge: 'KNOWLEDGE BASE' })[activeView.value] || 'OPSFLOW')
-const pageTitle = computed(() => activeView.value === 'overview' ? '早上好，' + displayName.value : ({ workbench: '运营待办', supportGroups: '支持组队列', tickets: '工单中心', satisfaction: '服务评价与质量', catalog: '服务目录', changes: '变更管理', releases: '发布治理', runbooks: '运行手册', problems: '问题管理', alerts: '监控告警', reliability: '可靠性 SLO', statusPage: '服务状态', incidents: '事件指挥台', postmortems: '事件复盘', oncall: '值班与升级', cmdb: '资产与配置项', messages: '异步消息中心', attachmentSecurity: '附件安全中心', capacity: '容量规划中心', disasterRecovery: '备份与灾难恢复', resilienceChaos: '韧性演练中心', integrations: '集成中心', team: '团队管理', knowledge: '知识库' })[activeView.value] || 'OpsFlow')
+const pageEyebrow = computed(() => VIEW_META[activeView.value]?.eyebrow || 'OPSFLOW')
+const pageTitle = computed(() => activeView.value === 'overview'
+  ? '早上好，' + displayName.value
+  : VIEW_META[activeView.value]?.title || 'OpsFlow')
 const activeCount = computed(() => dashboardOverview.value?.active ?? tickets.value.filter(ticket => ['OPEN', 'IN_PROGRESS', 'WAITING_CONFIRMATION'].includes(ticket.status)).length)
 const urgentCount = computed(() => dashboardOverview.value?.urgent ?? tickets.value.filter(ticket => ticket.priority === 'URGENT').length)
 const resolvedCount = computed(() => dashboardOverview.value?.resolved ?? tickets.value.filter(ticket => ['RESOLVED', 'CLOSED'].includes(ticket.status)).length)
@@ -673,13 +682,10 @@ function notify(message) {
   window.setTimeout(() => { toast.value = '' }, 2600)
 }
 function logout() {
-  token.value = ''
-  user.value = null
+  session.clear()
   closePreview()
   closeArticleReader()
-  localStorage.removeItem(TOKEN_KEY)
   clearTicketSelection()
-  localStorage.removeItem(USER_KEY)
   staffMembers.value = []
   dashboardOverview.value = null
   dashboardReport.value = null
@@ -728,6 +734,7 @@ function logout() {
   auditExportActions.value = []
 
   showExportModal.value = false
+  router.replace(VIEW_META.overview.path).catch(() => {})
 }
 
 function toggleTicketSelection(ticketId) {
@@ -765,52 +772,16 @@ function clearTicketSelection() {
   bulkForm.status = ''
   bulkForm.priority = ''
 }
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) }
-  if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json'
-  if (token.value) headers.Authorization = `Bearer ${token.value}`
-  const response = await fetch(path, { ...options, headers })
-  const traceId = response.headers.get('X-Trace-Id')
-  const requestId = response.headers.get('X-Request-Id')
-  const diagnosticId = traceId || requestId
-  const diagnosticHint = diagnosticId ? `（追踪编号：${diagnosticId}）` : ''
-  if (response.status === 401 || response.status === 403) {
-    logout()
-    throw new Error(`登录已失效，请重新登录${diagnosticHint}`)
-  }
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok || payload.success === false) {
-    throw new Error(`${payload.message || '请求失败'}${diagnosticHint}`)
-  }
-  return payload.data
-}
-
-async function downloadCsv(path, filename) {
-  const response = await fetch(path, { headers: { Authorization: 'Bearer ' + token.value } })
-  const traceId = response.headers.get('X-Trace-Id')
-  const requestId = response.headers.get('X-Request-Id')
-  const diagnosticId = traceId || requestId
-  const diagnosticHint = diagnosticId ? `（追踪编号：${diagnosticId}）` : ''
-  if (response.status === 401 || response.status === 403) {
-    logout()
-    throw new Error(`登录已失效，请重新登录${diagnosticHint}`)
-  }
-  if (!response.ok) throw new Error(`导出失败，请稍后重试${diagnosticHint}`)
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-async function signIn() {
+async function signIn(credentials) {
   loading.value = true
   error.value = ''
   try {
-    const data = await api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(loginForm) })
+    const data = await api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(credentials) })
     establishSession(data)
+    if ((route.meta.access === 'admin' && !isAdmin.value)
+      || (route.meta.access === 'staff' && !canBulkUpdate.value)) {
+      await router.replace(VIEW_META.overview.path)
+    }
     await loadDashboard()
   } catch (err) {
     error.value = err.message
@@ -820,10 +791,7 @@ async function signIn() {
 }
 
 function establishSession(data) {
-  token.value = data.token
-  user.value = data
-  localStorage.setItem(TOKEN_KEY, data.token)
-  localStorage.setItem(USER_KEY, JSON.stringify(data))
+  session.establish(data)
 }
 
 async function loadSsoProviders() {
@@ -2963,61 +2931,47 @@ onMounted(async () => {
 <template>
   <StatusPagePublic v-if="isPublicStatusPage" />
   <main v-else class="app-shell">
-    <section v-if="!token" class="login-page">
-      <div class="login-card">
-        <div class="brand-mark">OF</div>
-        <p class="eyebrow">ENTERPRISE SERVICE OPERATIONS</p>
-        <h1>让每个请求，都有清晰的流转路径。</h1>
-        <p class="login-subtitle">OpsFlow 将工单、知识和团队协作放在同一个工作台。</p>
-        <form class="login-form" @submit.prevent="signIn">
-          <label>账号<input v-model="loginForm.username" autocomplete="username" /></label>
-          <label>密码<input v-model="loginForm.password" type="password" autocomplete="current-password" /></label>
-          <p v-if="error" class="form-error">{{ error }}</p>
-          <button class="primary-button" :disabled="loading">{{ loading ? '登录中…' : '进入工作台' }}</button>
-        </form>
-        <div v-if="ssoLoading || ssoProviders.length" class="sso-login-block">
-          <div class="sso-divider"><span>或使用企业身份</span></div>
-          <p v-if="ssoLoading" class="sso-loading">正在读取企业登录入口…</p>
-          <a v-for="provider in ssoProviders" v-else :key="provider.registrationId"
-             class="sso-provider-button" :href="provider.authorizationUrl">
-            <span>{{ provider.displayName.slice(0, 1) }}</span>
-            使用 {{ provider.displayName }} 登录
-            <b>SSO →</b>
-          </a>
-        </div>
-        <p class="demo-hint">请使用自行注册或管理员分配的账号登录</p>
-      </div>
-      <div class="login-side"><p class="eyebrow">OPS / FLOW / 01</p><h2>把“有人跟进”<br /><span>变成可观测的流程。</span></h2><div class="signal-card"><i></i>系统运行正常<strong>99.9%</strong></div></div>
-    </section>
+    <LoginView
+      v-if="!token"
+      :loading="loading"
+      :error="error"
+      :sso-loading="ssoLoading"
+      :sso-providers="ssoProviders"
+      @submit="signIn"
+    />
 
     <section v-else class="workspace">
       <GlobalSearch ref="globalSearchRef" :api="api" @select="handleGlobalSearchSelect" />
-      <aside class="sidebar">
-        <div class="brand-lockup"><div class="brand-mark small">OF</div><div><strong>OpsFlow</strong><small>Service workspace</small></div></div>
-        <p class="workspace-label">工作台</p>
-        <nav>
-          <button :class="{ active: activeView === 'overview' }" @click="activeView = 'overview'"><b>⌂</b>总览</button>
-          <button @click="globalSearchRef?.openSearch()"><b>⌕</b>全局搜索<em>Ctrl K</em></button>
-          <button :class="{ active: activeView === 'tickets' }" @click="activeView = 'tickets'"><b>◫</b>工单中心<em>{{ ticketTotal }}</em></button>
-          <button :class="{ active: activeView === 'satisfaction' }" @click="activeView = 'satisfaction'"><b>★</b>服务评价</button>
-          <button v-if="canBulkUpdate" :class="{ active: activeView === 'workbench' }" @click="activeView = 'workbench'"><b>◎</b>运营待办</button>
-          <button v-if="canBulkUpdate" :class="{ active: activeView === 'supportGroups' }" @click="activeView = 'supportGroups'"><b>♜</b>支持组队列</button>
-          <button :class="{ active: activeView === 'catalog' }" @click="activeView = 'catalog'"><b>◇</b>服务目录<em v-if="pendingServiceRequestCount">{{ pendingServiceRequestCount }}</em></button>          <button :class="{ active: activeView === 'changes' }" @click="activeView = 'changes'"><b>↗</b>变更管理<em v-if="pendingChangeCount">{{ pendingChangeCount }}</em></button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'releases' }" @click="activeView = 'releases'"><b>⇪</b>发布治理</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'runbooks' }" @click="activeView = 'runbooks'"><b>☷</b>运行手册</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'alerts' }" @click="activeView = 'alerts'"><b>⚡</b>监控告警</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'reliability' }" @click="activeView = 'reliability'"><b>◌</b>可靠性 SLO</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'statusPage' }" @click="activeView = 'statusPage'"><b>◉</b>服务状态</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'oncall' }" @click="activeView = 'oncall'"><b>◷</b>值班升级</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'incidents' }" @click="activeView = 'incidents'"><b>⚑</b>事件指挥</button>          <button v-if="canBulkUpdate" :class="{ active: activeView === 'postmortems' }" @click="activeView = 'postmortems'"><b>◈</b>事件复盘</button>          <button :class="{ active: activeView === 'problems' }" @click="activeView = 'problems'"><b>⌁</b>问题管理<em v-if="pendingProblemCount">{{ pendingProblemCount }}</em></button><button :class="{ active: activeView === 'cmdb' }" @click="activeView = 'cmdb'"><b>▦</b>资产 CMDB<em>{{ cmdbAssets.length }}</em></button>
-          <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><b>▤</b>知识库<em>{{ articleTotal }}</em></button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'attachmentSecurity' }" @click="activeView = 'attachmentSecurity'"><b>⌾</b>附件安全</button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'messages' }" @click="activeView = 'messages'"><b>⇄</b>异步消息</button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'capacity' }" @click="activeView = 'capacity'"><b>⌁</b>容量规划</button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'disasterRecovery' }" @click="activeView = 'disasterRecovery'"><b>⛨</b>备份恢复</button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'resilienceChaos' }" @click="activeView = 'resilienceChaos'"><b>⌁</b>韧性演练</button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'integrations' }" @click="activeView = 'integrations'"><b>⌁</b>集成中心<em v-if="webhookDeadCount">{{ webhookDeadCount }}</em></button>
-          <button v-if="isAdmin" :class="{ active: activeView === 'team' }" @click="openTeam"><b>♙</b>团队管理<em>{{ teamUsers.length }}</em></button>
-        </nav>
-        <div class="sidebar-bottom"><div class="mini-status"><i></i><span>API & Redis 正常</span></div><button class="logout-button" @click="logout">退出登录</button></div>
-      </aside>
+      <AppSidebar
+        :active-view="activeView"
+        :is-admin="isAdmin"
+        :is-staff="canBulkUpdate"
+        :counts="sidebarCounts"
+        @navigate="navigateTo"
+        @search="globalSearchRef?.openSearch()"
+        @logout="logout"
+      />
 
       <div class="content-area">
-        <header class="topbar"><div><p class="eyebrow">{{ pageEyebrow }}</p><h1>{{ pageTitle }}</h1></div><div class="topbar-user"><div class="notification-wrap"><button class="notification-button" @click="toggleNotifications" aria-label="打开通知中心">♢<b v-if="notificationUnread">{{ notificationUnread > 99 ? '99+' : notificationUnread }}</b></button><div v-if="showNotifications" class="notification-popover"><div class="notification-header"><strong>通知中心</strong><div><button class="notification-scan" @click.stop="showNotificationPreferences = true; showNotifications = false">渠道偏好</button><button v-if="canBulkUpdate" class="notification-scan" @click.stop="runSlaScan">扫描 SLA</button><button class="notification-scan" @click.stop="markAllNotifications">全部已读</button></div></div><div v-if="loadingNotifications" class="notification-empty">正在加载通知…</div><div v-else-if="!notifications.length" class="notification-empty">暂无通知</div><button v-for="notification in notifications" v-else :key="notification.id" :class="['notification-item', { unread: !notification.readAt }]" @click="openNotification(notification)"><i></i><div><strong>{{ notification.title }}</strong><p>{{ notification.content }}</p><small>{{ formatDate(notification.createdAt) }}</small></div></button><div class="notification-footer">支持站内信、邮件与签名 Webhook · 仅展示最近 20 条</div></div></div><div class="avatar">{{ displayName.slice(0, 1) }}</div><div><strong>{{ displayName }}</strong><small>{{ user?.roles?.join(' · ') || 'REQUESTER' }}{{ user?.authSource === 'OIDC' ? ' · 企业身份' : '' }}</small></div><button v-if="user?.authSource !== 'OIDC'" class="account-action" @click="showPasswordModal = true">修改密码</button></div></header>
-        <p v-if="error" class="page-error">{{ error }} <button @click="error = ''">×</button></p>
+        <AppTopbar
+          :eyebrow="pageEyebrow"
+          :title="pageTitle"
+          :display-name="displayName"
+          :user="user"
+          :unread="notificationUnread"
+          :notifications="notifications"
+          :notifications-visible="showNotifications"
+          :notifications-loading="loadingNotifications"
+          :is-staff="canBulkUpdate"
+          :format-date="formatDate"
+          @toggle-notifications="toggleNotifications"
+          @preferences="showNotificationPreferences = true; showNotifications = false"
+          @scan-sla="runSlaScan"
+          @mark-all="markAllNotifications"
+          @open-notification="openNotification"
+          @change-password="showPasswordModal = true"
+        />
+        <PageErrorBanner :message="error" @dismiss="error = ''" />
 
         <section v-if="activeView === 'overview'" class="view-panel">
           <div class="hero-row"><div><span class="tag">TODAY'S CONTROL ROOM</span><h2>把团队的注意力，<br /><span>放在真正重要的请求上。</span></h2><p>从接收到解决，每一步都有记录，每个知识都能复用。</p></div><button class="primary-button" @click="showTicketModal = true">＋ 创建新工单</button></div>
@@ -3203,6 +3157,6 @@ onMounted(async () => {
     </div>
     <IdentityAccessCenter v-if="token && activeView === 'team'" :api="api" :users="teamUsers" />
     <NotificationPreferenceModal :visible="showNotificationPreferences" :api="api" @close="showNotificationPreferences = false" @saved="notify('通知偏好已保存')" />
-    <transition name="toast"><div v-if="toast" class="toast-message">✓ {{ toast }}</div></transition>
+    <ToastMessage :message="toast" />
   </main>
 </template>
