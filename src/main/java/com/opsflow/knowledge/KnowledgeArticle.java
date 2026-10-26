@@ -15,6 +15,8 @@ public class KnowledgeArticle {
     private Long id;
     private Long tenantId;
     private Long authorId;
+    private Long sourceTicketId;
+    private String sourceTicketNo;
     private String title;
     private String slug;
     private String category;

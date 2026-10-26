@@ -6,7 +6,8 @@ import com.opsflow.common.ApiResponse;
 import com.opsflow.common.BusinessException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -46,6 +47,7 @@ public class KnowledgeController {
     @PostMapping
     public ApiResponse<KnowledgeArticle> create(@Valid @RequestBody CreateArticleRequest request,
                                                 @AuthenticationPrincipal AuthPrincipal principal) {
+        requireStaff(principal);
         KnowledgeService.CreateArticleCommand command = new KnowledgeService.CreateArticleCommand(
                 request.title(), request.slug(), request.category(), request.content());
         return ApiResponse.ok(knowledgeService.create(command, principal.id(), principal.tenantId()), "文章已保存为草稿");

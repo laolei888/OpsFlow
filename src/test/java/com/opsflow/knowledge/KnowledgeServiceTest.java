@@ -3,11 +3,17 @@ package com.opsflow.knowledge;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
+import com.opsflow.ticket.Ticket;
+import com.opsflow.ticket.TicketResolutionCode;
+import com.opsflow.ticket.TicketStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -119,6 +125,78 @@ class KnowledgeServiceTest {
         verify(auditLogService, never()).record(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
+    @Test
+    void createsReusableDraftFromConfirmedTicketResolution() {
+        Ticket ticket = resolvedTicket();
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(knowledgeMapper.insert(any(KnowledgeArticle.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, KnowledgeArticle.class).setId(41L);
+            return 1;
+        });
+
+        KnowledgeService.KnowledgeDraftResult result =
+                knowledgeService.createFromResolvedTicket(ticket, 9L, 3L);
+
+        KnowledgeArticle article = result.article();
+        assertEquals(true, result.created());
+        assertEquals(41L, article.getId());
+        assertEquals(1L, article.getSourceTicketId());
+        assertEquals("OPF-RES-001", article.getSourceTicketNo());
+        assertEquals(KnowledgeStatus.DRAFT, article.getStatus());
+        assertEquals("VPN 无法连接｜解决方案", article.getTitle());
+        assertEquals(true, article.getContent().contains("## 解决方案"));
+        assertEquals(true, article.getContent().contains("修复网关路由配置"));
+        assertEquals(true, article.getContent().contains("## 验证结果"));
+        verify(articleVersionService).record(article, 9L, "CREATED_FROM_TICKET");
+        verify(auditLogService).record(eq(3L), eq(9L), eq("KNOWLEDGE_ARTICLE"), eq(41L),
+                eq("KNOWLEDGE_DRAFT_CREATED_FROM_TICKET"), any(), any(), any());
+    }
+
+    @Test
+    void reusesExistingDraftForSameSourceTicket() {
+        Ticket ticket = resolvedTicket();
+        KnowledgeArticle existing = article(42L, KnowledgeStatus.DRAFT);
+        existing.setSourceTicketId(1L);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(existing);
+
+        KnowledgeService.KnowledgeDraftResult result =
+                knowledgeService.createFromResolvedTicket(ticket, 9L, 3L);
+
+        assertEquals(false, result.created());
+        assertEquals(42L, result.article().getId());
+        verify(knowledgeMapper, never()).insert(any(KnowledgeArticle.class));
+        verify(articleVersionService, never()).record(any(), any(), any());
+    }
+
+    @Test
+    void returnsConcurrentDraftAfterUniqueConstraintConflict() {
+        Ticket ticket = resolvedTicket();
+        KnowledgeArticle concurrent = article(43L, KnowledgeStatus.DRAFT);
+        concurrent.setSourceTicketId(1L);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(null, concurrent);
+        when(knowledgeMapper.insert(any(KnowledgeArticle.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate source ticket"));
+
+        KnowledgeService.KnowledgeDraftResult result =
+                knowledgeService.createFromResolvedTicket(ticket, 9L, 3L);
+
+        assertEquals(false, result.created());
+        assertEquals(43L, result.article().getId());
+        verify(articleVersionService, never()).record(any(), any(), any());
+    }
+
+    @Test
+    void rejectsKnowledgeDraftBeforeRequesterConfirmation() {
+        Ticket ticket = resolvedTicket();
+        ticket.setStatus(TicketStatus.WAITING_CONFIRMATION);
+        ticket.setConfirmedAt(null);
+
+        assertThrows(BusinessException.class,
+                () -> knowledgeService.createFromResolvedTicket(ticket, 9L, 3L));
+
+        verify(knowledgeMapper, never()).insert(any(KnowledgeArticle.class));
+    }
+
     private KnowledgeArticle article(Long id, KnowledgeStatus status) {
         KnowledgeArticle article = new KnowledgeArticle();
         article.setId(id);
@@ -132,5 +210,23 @@ class KnowledgeServiceTest {
         article.setVersion(0);
         article.setViewCount(0L);
         return article;
+    }
+
+    private Ticket resolvedTicket() {
+        Ticket ticket = new Ticket();
+        ticket.setId(1L);
+        ticket.setTenantId(3L);
+        ticket.setTicketNo("OPF-RES-001");
+        ticket.setTitle("VPN 无法连接");
+        ticket.setDescription("客户端持续连接超时");
+        ticket.setImpactScope("研发团队无法远程办公");
+        ticket.setAttemptedActions("重启客户端并切换网络");
+        ticket.setCategory("网络");
+        ticket.setStatus(TicketStatus.RESOLVED);
+        ticket.setResolutionCode(TicketResolutionCode.FIXED);
+        ticket.setResolutionSummary("修复网关路由配置");
+        ticket.setVerificationResult("申请人复测连接成功");
+        ticket.setConfirmedAt(LocalDateTime.now());
+        return ticket;
     }
 }

@@ -283,6 +283,19 @@ class TicketServiceTest {
     }
 
     @Test
+    void reopeningResolvedTicketClearsCurrentAcceptanceTimestamp() {
+        Ticket ticket = ticket(TicketStatus.RESOLVED);
+        ticket.setConfirmedAt(java.time.LocalDateTime.now());
+        when(ticketMapper.selectOne(any(Wrapper.class))).thenReturn(ticket);
+        when(ticketMapper.updateById(ticket)).thenReturn(1);
+
+        Ticket reopened = ticketService.transition(1L, TicketStatus.IN_PROGRESS, 9L, 3L);
+
+        assertEquals(TicketStatus.IN_PROGRESS, reopened.getStatus());
+        assertEquals(null, reopened.getConfirmedAt());
+    }
+
+    @Test
     void batchUpdatesSelectedTicketsAndKeepsAuditPerTicket() {
         Ticket first = ticket(TicketStatus.OPEN);
         first.setTicketNo("OPF-FIRST");

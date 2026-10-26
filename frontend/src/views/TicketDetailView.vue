@@ -24,13 +24,14 @@ const props = defineProps({
   assets: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['back', 'changed', 'notify', 'error', 'navigate'])
+const emit = defineEmits(['back', 'changed', 'notify', 'error', 'navigate', 'knowledge-created', 'open-knowledge'])
 
 const ticket = ref(null)
 const comments = ref([])
 const auditLogs = ref([])
 const attachments = ref([])
 const recommendations = ref([])
+const knowledgeDraft = ref(null)
 const assetLinks = ref([])
 const uploadCapabilities = ref(null)
 const loading = ref(true)
@@ -51,6 +52,7 @@ const pendingTransition = ref(null)
 const transitionReason = ref('')
 const showResolutionModal = ref(false)
 const submittingResolution = ref(false)
+const creatingKnowledgeDraft = ref(false)
 const resolutionForm = ref({ resolutionCode: 'FIXED', resolutionSummary: '', verificationResult: '' })
 const now = ref(Date.now())
 const editForm = ref({
@@ -64,6 +66,9 @@ const availableActions = computed(() => ticketActions(ticket.value?.status, isSt
 const sla = computed(() => slaState(ticket.value, now.value))
 const slaRemaining = computed(() => formatSlaRemaining(sla.value.diffMs))
 const isTerminal = computed(() => ['CLOSED', 'REJECTED'].includes(ticket.value?.status))
+const canCreateKnowledgeDraft = computed(() => isStaff.value
+  && ['RESOLVED', 'CLOSED'].includes(ticket.value?.status)
+  && Boolean(ticket.value?.confirmedAt && ticket.value?.resolutionSummary))
 const assigneeName = computed(() => {
   if (!ticket.value?.assigneeId) return '尚未分配'
   return props.staffMembers.find(member => String(member.id) === String(ticket.value.assigneeId))?.displayName
@@ -95,7 +100,8 @@ const auditLabels = Object.freeze({
   AUTOMATION_APPLIED: '自动化规则已执行',
   RESOLUTION_SUBMITTED: '提交解决方案',
   RESOLUTION_CONFIRMED: '申请人确认解决',
-  RESOLUTION_REOPENED: '申请人退回处理'
+  RESOLUTION_REOPENED: '申请人退回处理',
+  KNOWLEDGE_DRAFT_CREATED: '沉淀知识草稿'
 })
 
 const timer = window.setInterval(() => { now.value = Date.now() }, 60000)
@@ -132,17 +138,21 @@ async function loadDetail() {
   try {
     const current = await props.api(`/api/v1/tickets/${props.ticketId}`)
     ticket.value = current
+    knowledgeDraft.value = null
     selectedAssigneeId.value = current.assigneeId ? String(current.assigneeId) : ''
     const recommendationQuery = current.category
       ? `category=${encodeURIComponent(current.category)}`
       : `keyword=${encodeURIComponent(current.title || '')}`
-    const [commentList, logList, attachmentList, articlePage, links, capabilities] = await Promise.all([
+    const [commentList, logList, attachmentList, articlePage, links, capabilities, draft] = await Promise.all([
       props.api(`/api/v1/tickets/${props.ticketId}/comments`),
       props.api(`/api/v1/tickets/${props.ticketId}/audit-logs`),
       props.api(`/api/v1/tickets/${props.ticketId}/attachments`),
       props.api(`/api/v1/knowledge/articles?page=1&size=3&${recommendationQuery}`).catch(() => ({ records: [] })),
       props.api(`/api/v1/cmdb/tickets/${props.ticketId}/assets`).catch(() => []),
-      props.api(`/api/v1/tickets/${props.ticketId}/attachments/upload-capabilities`).catch(() => null)
+      props.api(`/api/v1/tickets/${props.ticketId}/attachments/upload-capabilities`).catch(() => null),
+      isStaff.value
+        ? props.api(`/api/v1/tickets/${props.ticketId}/knowledge-draft`).catch(() => null)
+        : Promise.resolve(null)
     ])
     comments.value = normalizeRecords(commentList)
     auditLogs.value = normalizeRecords(logList)
@@ -150,6 +160,7 @@ async function loadDetail() {
     recommendations.value = normalizeRecords(articlePage)
     assetLinks.value = normalizeRecords(links)
     uploadCapabilities.value = capabilities
+    knowledgeDraft.value = draft
     emit('changed', current)
   } catch (error) {
     reportError(error)
@@ -250,6 +261,26 @@ async function performResolutionDecision(action, comment = '') {
   } finally {
     busyAction.value = ''
   }
+}
+
+async function createKnowledgeDraft() {
+  if (!canCreateKnowledgeDraft.value || creatingKnowledgeDraft.value) return
+  creatingKnowledgeDraft.value = true
+  try {
+    const article = await props.api(`/api/v1/tickets/${props.ticketId}/knowledge-draft`, { method: 'POST' })
+    knowledgeDraft.value = article
+    emit('knowledge-created', article)
+    await refreshActivity()
+    emit('notify', '解决方案已生成知识草稿，可继续编辑后发布')
+  } catch (error) {
+    reportError(error)
+  } finally {
+    creatingKnowledgeDraft.value = false
+  }
+}
+
+function openKnowledgeDraft() {
+  if (knowledgeDraft.value) emit('open-knowledge', knowledgeDraft.value)
 }
 
 async function performTransition(action) {
@@ -519,7 +550,11 @@ function linkTypeLabel(type) {
           <article v-if="ticket.resolutionSummary" class="panel-card detail-section resolution-card">
             <div class="section-heading">
               <div><span>RESOLUTION PACKAGE</span><h3>解决方案与验收</h3></div>
-              <span>{{ resolutionCodeLabels[ticket.resolutionCode] || ticket.resolutionCode }}</span>
+              <div class="resolution-heading-actions">
+                <span>{{ resolutionCodeLabels[ticket.resolutionCode] || ticket.resolutionCode }}</span>
+                <button v-if="knowledgeDraft" type="button" class="inline-action knowledge-draft-action" @click="openKnowledgeDraft">{{ knowledgeDraft.status === 'DRAFT' ? '查看知识草稿' : '查看知识文章' }}</button>
+                <button v-else-if="canCreateKnowledgeDraft" type="button" class="inline-action knowledge-draft-action" :disabled="creatingKnowledgeDraft" @click="createKnowledgeDraft">{{ creatingKnowledgeDraft ? '生成中…' : '沉淀为知识' }}</button>
+              </div>
             </div>
             <div class="resolution-summary">
               <span>解决摘要</span>
@@ -728,6 +763,7 @@ function linkTypeLabel(type) {
 .ticket-detail-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.95fr) minmax(270px,.62fr);gap:16px;align-items:start}.detail-primary,.detail-sidebar{display:flex;flex-direction:column;gap:16px}.detail-section,.detail-activity,.side-card,.sla-card{padding:20px}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.section-heading h3,.side-heading h3{margin:3px 0 0;color:#1c2738;font-size:16px}.section-heading>b{display:grid;place-items:center;min-width:28px;height:28px;border-radius:8px;background:#f0f4fa;color:#41628f}.section-heading>span{font-size:11px;color:#64748b;background:#f5f7fa;border-radius:999px;padding:5px 9px}.description-card>p{margin:0;color:#475467;line-height:1.8;white-space:pre-wrap}.attachment-uploader{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px dashed #b9c7dc;border-radius:10px;background:#f8fbff;cursor:pointer;margin-bottom:12px}.attachment-uploader span{font-weight:750;color:#2f65bc}.attachment-uploader small{color:#8792a2}.attachment-stack{display:flex;flex-direction:column}.attachment-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto auto auto;align-items:center;gap:10px;padding:11px 0;border-top:1px solid #edf0f4}.file-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;background:#eef3fb;color:#53709c;font-size:9px;font-weight:850}.file-info{display:flex;flex-direction:column;min-width:0}.file-info strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}.file-info small{color:#8a94a4;font-size:10px}.scan-badge{padding:4px 7px;border-radius:999px;background:#fff5df;color:#8b6500;font-size:10px;font-weight:750}.scan-clean,.scan-released{background:#eaf8f0;color:#16764a}.scan-infected,.scan-failed{background:#fff0f0;color:#b42318}.inline-action{border:0;background:none;color:#2b64c0;font-size:11px;font-weight:750;padding:4px;cursor:pointer}.inline-action:disabled{color:#adb5c2;cursor:not-allowed}.danger-text{color:#bd3b34}.detail-empty,.side-empty{padding:20px 10px;text-align:center;color:#8b95a4;font-size:12px}.knowledge-stack{display:grid;gap:10px}.knowledge-stack button{border:1px solid #e5e9ef;border-radius:10px;background:#fff;padding:13px;text-align:left;cursor:pointer;transition:.18s}.knowledge-stack button:hover{border-color:#a9c2eb;transform:translateY(-1px)}.knowledge-stack span{font-size:10px;color:#2c66c3;font-weight:750}.knowledge-stack strong{display:block;margin:4px 0;color:#253044}.knowledge-stack p{margin:0;color:#7b8493;font-size:11px;line-height:1.5}
 .request-context-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}.request-context-grid section{border:1px solid #e4e8ee;border-radius:10px;background:#fafbfd;padding:12px}.request-context-grid .attempted-actions{grid-column:1/-1}.request-context-grid span{font-size:9px;font-weight:850;letter-spacing:.1em;color:#8792a2}.request-context-grid p{margin:6px 0 0;color:#536072;font-size:11px;line-height:1.6;white-space:pre-wrap}
 .resolution-card{border-color:#cfdced;background:linear-gradient(145deg,#fff 58%,#f2f7ff)}.resolution-summary,.resolution-verification{padding:13px 14px;border:1px solid #e0e7f0;border-radius:10px;background:rgba(255,255,255,.82);margin-top:10px}.resolution-summary>span,.resolution-verification>span{font-size:9px;font-weight:850;letter-spacing:.1em;color:#71819a}.resolution-summary p,.resolution-verification p{margin:7px 0 0;white-space:pre-wrap;color:#46566c;font-size:12px;line-height:1.65}.resolution-card footer{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:13px}.resolution-card footer small{color:#8994a4}.resolution-card footer strong{font-size:10px;color:#26764b;background:#e9f7ef;padding:5px 8px;border-radius:999px}.resolution-card footer strong.reopened{color:#b54708;background:#fff4e5}
+.resolution-heading-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.resolution-heading-actions>span{font-size:11px;color:#64748b;background:#f5f7fa;border-radius:999px;padding:5px 9px}.knowledge-draft-action{border:1px solid #b9cae5!important;border-radius:999px!important;padding:5px 9px!important;background:#fff!important}
 .detail-activity{position:sticky;top:12px;max-height:calc(100vh - 115px);overflow:hidden;display:flex;flex-direction:column}.activity-heading{flex:0 0 auto}.activity-composer{border:1px solid #dfe4eb;border-radius:10px;overflow:hidden;margin-bottom:14px;flex:0 0 auto}.activity-composer textarea{display:block;width:100%;border:0;padding:12px;resize:vertical;outline:0;font:inherit;box-sizing:border-box}.activity-composer>div{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid #edf0f4;background:#fafbfc;padding:8px}.activity-composer select{border:0;background:transparent;color:#566173}.activity-composer span{font-size:11px;color:#7f8998}.activity-composer button{padding:8px 11px}.timeline-list{overflow:auto;padding-right:4px}.timeline-entry{display:grid;grid-template-columns:26px 1fr;gap:8px;position:relative;padding:0 0 18px}.timeline-entry:not(:last-child)::before{content:"";position:absolute;left:11px;top:23px;bottom:0;width:1px;background:#e2e7ee}.timeline-dot{width:23px;height:23px;border-radius:50%;display:grid;place-items:center;background:#eef3fb;color:#3867ad;font-weight:800;z-index:1}.timeline-entry.comment .timeline-dot{background:#eaf7f0;color:#28754a}.timeline-entry header{display:flex;justify-content:space-between;gap:10px}.timeline-entry header strong{font-size:12px;color:#344054}.timeline-entry time{font-size:9px;color:#98a2b3;white-space:nowrap}.timeline-entry p{margin:6px 0 0;color:#667085;font-size:11px;line-height:1.55;white-space:pre-wrap}
 .sla-card{overflow:hidden}.sla-head{display:flex;align-items:center;justify-content:space-between}.sla-head b{font-size:11px;border-radius:999px;padding:4px 7px;background:#eaf8f0;color:#18764a}.sla-card>strong{display:block;font-size:22px;margin:14px 0 12px;color:#1d2939}.sla-track{height:5px;border-radius:9px;background:#e8edf2;overflow:hidden}.sla-track i{display:block;height:100%;width:68%;background:#36a269}.sla-card>small{display:block;margin-top:9px;color:#7b8493}.sla-due-soon .sla-head b{background:#fff5df;color:#946200}.sla-due-soon .sla-track i{width:88%;background:#e9a52f}.sla-overdue .sla-head b{background:#fff0f0;color:#b42318}.sla-overdue .sla-track i{width:100%;background:#d94b45}.sla-completed .sla-track i{width:100%;background:#7892b7}.sla-unknown .sla-track i{width:0}.side-heading{margin-bottom:15px}.owner-summary{display:flex;gap:11px;align-items:center;margin-bottom:14px}.owner-avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:#162b4e;color:#fff;font-weight:800}.owner-summary div{display:flex;flex-direction:column}.owner-summary strong{font-size:13px}.owner-summary small{color:#8892a2;font-size:10px}.assign-control,.asset-linker{display:flex;flex-direction:column;gap:8px}.assign-control select,.asset-linker select{width:100%;padding:9px;border:1px solid #dfe4eb;border-radius:8px;background:#fff}.ownership-actions{display:flex;gap:8px;margin-top:8px}.ownership-actions button{flex:1;border:1px solid #dce2ea;background:#fff;border-radius:8px;padding:8px;color:#526070;cursor:pointer}.ticket-facts{margin:0}.ticket-facts>div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #edf0f4}.ticket-facts dt{font-size:11px;color:#8b95a3}.ticket-facts dd{margin:0;font-size:11px;color:#344054;text-align:right;font-weight:650}.asset-stack{display:flex;flex-direction:column;margin-bottom:12px}.asset-row{display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid #edf0f4}.asset-row>div{display:flex;flex-direction:column}.asset-row strong{font-size:11px}.asset-row small{font-size:9px;color:#8b95a4}
 .detail-overlay{position:fixed;inset:0;background:rgba(13,22,38,.48);display:grid;place-items:center;z-index:200;padding:20px}.detail-dialog{width:min(620px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 25px 70px rgba(14,27,49,.25);display:flex;flex-direction:column;gap:15px}.detail-dialog header{display:flex;align-items:flex-start;justify-content:space-between}.detail-dialog h2{margin:4px 0 0}.detail-dialog header button{border:0;background:none;font-size:24px;color:#7a8493;cursor:pointer}.detail-dialog label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#475467;font-weight:700}.detail-dialog input,.detail-dialog textarea,.detail-dialog select{border:1px solid #d9dfe8;border-radius:9px;padding:10px;font:inherit}.dialog-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.detail-dialog footer{display:flex;justify-content:flex-end;gap:8px}.transition-dialog{width:min(500px,100%)}.transition-dialog>p{margin:0;color:#667085;line-height:1.6}

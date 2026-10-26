@@ -311,6 +311,7 @@ const articleForm = reactive({ title: '', slug: '', category: '网络', content:
 const auditLabels = { CREATED: '创建工单', KNOWLEDGE_ARTICLE_CREATED: '创建知识文章', KNOWLEDGE_ARTICLE_UPDATED: '编辑知识文章', KNOWLEDGE_ARTICLE_PUBLISHED: '发布知识文章', KNOWLEDGE_ARTICLE_ARCHIVED: '归档知识文章', KNOWLEDGE_ARTICLE_RESTORED: '恢复知识文章', KNOWLEDGE_ARTICLE_VERSION_RESTORED: '恢复历史版本', TICKET_UPDATED: '编辑工单', STATUS_CHANGED: '状态流转', COMMENT_ADDED: '新增评论', BULK_UPDATED: '批量更新工单', ASSIGNED: '领取 / 指派', UNASSIGNED: '释放工单', ATTACHMENT_ADDED: '添加附件', ATTACHMENT_DELETED: '删除附件', ATTACHMENT_SCAN_CLEAN: '附件扫描通过', ATTACHMENT_SCAN_BLOCKED: '附件威胁隔离', ATTACHMENT_SCAN_FAILED: '附件扫描失败', ATTACHMENT_SCAN_RETRY: '附件重新扫描', ATTACHMENT_MANUALLY_RELEASED: '附件人工放行', USER_CREATED: '创建用户', USER_STATUS_CHANGED: '更新用户状态', USER_ROLE_CHANGED: '更新用户角色', PASSWORD_CHANGED: '修改密码', SLA_POLICY_UPDATED: '更新 SLA 策略', EXPORT_GENERATED: '导出数据', IMPORT_GENERATED: '批量导入', SAVED_VIEW_CREATED: '创建保存视图', SAVED_VIEW_UPDATED: '更新保存视图', SAVED_VIEW_DELETED: '删除保存视图', AUTOMATION_RULE_CREATED: '创建自动化规则', AUTOMATION_RULE_UPDATED: '更新自动化规则', AUTOMATION_RULE_TOGGLED: '切换自动化规则', AUTOMATION_RULE_DELETED: '删除自动化规则', AUTOMATION_APPLIED: '执行自动化规则', REPORT_SUBSCRIPTION_CREATED: '创建报表订阅', REPORT_SUBSCRIPTION_UPDATED: '更新报表订阅', REPORT_SUBSCRIPTION_DELETED: '删除报表订阅', REPORT_SUBSCRIPTION_RUN: '生成订阅报表', SERVICE_CATALOG_ITEM_CREATED: '创建服务目录项', SERVICE_CATALOG_ITEM_UPDATED: '更新服务目录项', SERVICE_CATALOG_ITEM_TOGGLED: '切换服务目录项', SERVICE_REQUEST_CREATED: '提交服务申请', SERVICE_REQUEST_AUTO_APPROVED: '自动受理服务申请', SERVICE_REQUEST_APPROVED: '通过服务审批', SERVICE_REQUEST_REJECTED: '驳回服务审批', CMDB_ASSET_CREATED: '登记配置项', CMDB_ASSET_UPDATED: '更新配置项', CMDB_RELATION_CREATED: '建立资产关系', CMDB_RELATION_DELETED: '解除资产关系', CMDB_ASSET_LINKED: '关联工单配置项', CMDB_ASSET_UNLINKED: '解除工单配置项', INCIDENT_DECLARED: '宣布重大事件', INCIDENT_UPDATED: '更新事件指挥资料', INCIDENT_STATUS_CHANGED: '重大事件状态流转', INCIDENT_UPDATE_ADDED: '发布事件动态', INCIDENT_TASK_CREATED: '新增事件协同任务', INCIDENT_TASK_UPDATED: '更新事件协同任务', INCIDENT_TICKET_LINKED: '关联事件工单', INCIDENT_TICKET_UNLINKED: '解除事件工单关联', INCIDENT_ASSET_LINKED: '关联受影响配置项', INCIDENT_ASSET_UNLINKED: '解除事件配置项关联', ONCALL_SCHEDULE_CREATED: '创建值班表', ONCALL_SCHEDULE_UPDATED: '更新值班表', ONCALL_SHIFT_CREATED: '创建值班轮班', ONCALL_SHIFT_UPDATED: '更新值班轮班', ONCALL_SHIFT_DELETED: '删除值班轮班', ONCALL_POLICY_CREATED: '创建升级策略', ONCALL_POLICY_UPDATED: '更新升级策略', ONCALL_ESCALATION_STEP_CREATED: '新增升级步骤', ONCALL_ESCALATION_STEP_UPDATED: '更新升级步骤', ONCALL_ESCALATION_STEP_DELETED: '删除升级步骤', ONCALL_ESCALATION_TRIGGERED: '触发值班升级', ONCALL_ESCALATION_DISPATCHED: '派发值班升级通知', ONCALL_ESCALATION_RESOLVED: '停止值班升级', ONCALL_ESCALATION_CANCELLED: '取消值班升级' }
 Object.assign(auditLabels, {
   RESOLUTION_SUBMITTED: '提交解决方案', RESOLUTION_CONFIRMED: '申请人确认解决', RESOLUTION_REOPENED: '申请人退回处理',
+  KNOWLEDGE_DRAFT_CREATED: '沉淀知识草稿', KNOWLEDGE_DRAFT_CREATED_FROM_TICKET: '由工单生成知识草稿',
   ALERT_SOURCE_CREATED: '创建告警源', ALERT_SOURCE_UPDATED: '更新告警源', ALERT_SOURCE_KEY_ROTATED: '轮换告警密钥',
   ALERT_RULE_CREATED: '创建告警规则', ALERT_RULE_UPDATED: '更新告警规则',
   ALERT_SILENCE_CREATED: '创建静默窗口', ALERT_SILENCE_UPDATED: '更新静默窗口', ALERT_SILENCE_DELETED: '删除静默窗口',
@@ -367,6 +368,8 @@ const auditActionOptions = [
   { value: 'KNOWLEDGE_ARTICLE_PUBLISHED', label: '发布知识文章' },
   { value: 'KNOWLEDGE_ARTICLE_ARCHIVED', label: '归档知识文章' },
   { value: 'KNOWLEDGE_ARTICLE_RESTORED', label: '恢复知识文章' },  { value: 'KNOWLEDGE_ARTICLE_VERSION_RESTORED', label: '恢复历史版本' },
+  { value: 'KNOWLEDGE_DRAFT_CREATED', label: '沉淀知识草稿' },
+  { value: 'KNOWLEDGE_DRAFT_CREATED_FROM_TICKET', label: '由工单生成知识草稿' },
   { value: 'TICKET_UPDATED', label: '编辑工单' },
   { value: 'RESOLUTION_SUBMITTED', label: '提交解决方案' },
   { value: 'RESOLUTION_CONFIRMED', label: '申请人确认解决' },
@@ -1801,6 +1804,27 @@ function handleTicketDetailChanged(updatedTicket) {
   if (index >= 0) tickets.value.splice(index, 1, updatedTicket)
 }
 
+function upsertKnowledgeArticle(article) {
+  if (!article?.id) return
+  const index = articles.value.findIndex(item => String(item.id) === String(article.id))
+  if (index >= 0) articles.value.splice(index, 1, article)
+  else {
+    articles.value.unshift(article)
+    articleTotal.value += 1
+  }
+}
+
+function handleKnowledgeDraftCreated(article) {
+  upsertKnowledgeArticle(article)
+}
+
+function openKnowledgeArticleFromTicket(article) {
+  if (!article) return
+  upsertKnowledgeArticle(article)
+  activeView.value = 'knowledge'
+  openArticle(article)
+}
+
 function closeTicket() {
   showDetail.value = false
   selectedTicket.value = null
@@ -3043,6 +3067,8 @@ onMounted(async () => {
   :assets="cmdbAssets"
   @back="router.push({ name: 'tickets' })"
   @changed="handleTicketDetailChanged"
+  @knowledge-created="handleKnowledgeDraftCreated"
+  @open-knowledge="openKnowledgeArticleFromTicket"
   @notify="notify"
   @error="error = $event"
   @navigate="navigateTo"

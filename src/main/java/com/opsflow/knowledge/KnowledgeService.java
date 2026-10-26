@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.opsflow.audit.AuditLogService;
 import com.opsflow.common.BusinessException;
+import com.opsflow.ticket.Ticket;
+import com.opsflow.ticket.TicketStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -14,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -89,6 +92,63 @@ public class KnowledgeService {
         auditLogService.record(tenantId, authorId, "KNOWLEDGE_ARTICLE", article.getId(),
                 "KNOWLEDGE_ARTICLE_CREATED", null, snapshot(article), "创建知识文章");
         return article;
+    }
+
+    public KnowledgeArticle findBySourceTicket(Long sourceTicketId, Long tenantId) {
+        if (sourceTicketId == null) return null;
+        return knowledgeMapper.selectOne(new LambdaQueryWrapper<KnowledgeArticle>()
+                .eq(KnowledgeArticle::getTenantId, tenantId)
+                .eq(KnowledgeArticle::getSourceTicketId, sourceTicketId));
+    }
+
+    @Transactional
+    public KnowledgeDraftResult createFromResolvedTicket(Ticket ticket, Long authorId, Long tenantId) {
+        if (ticket == null || ticket.getId() == null || !tenantId.equals(ticket.getTenantId())) {
+            throw new BusinessException("来源工单不存在");
+        }
+        if ((ticket.getStatus() != TicketStatus.RESOLVED && ticket.getStatus() != TicketStatus.CLOSED)
+                || ticket.getConfirmedAt() == null) {
+            throw new BusinessException("只有申请人已经确认解决的工单才能沉淀知识");
+        }
+        String resolutionSummary = requiredText(ticket.getResolutionSummary(), "解决摘要", 10000);
+        String verificationResult = requiredText(ticket.getVerificationResult(), "验证结果", 2000);
+        KnowledgeArticle existing = findBySourceTicket(ticket.getId(), tenantId);
+        if (existing != null) return new KnowledgeDraftResult(existing, false);
+
+        KnowledgeArticle article = new KnowledgeArticle();
+        article.setTenantId(tenantId);
+        article.setAuthorId(authorId);
+        article.setSourceTicketId(ticket.getId());
+        article.setSourceTicketNo(ticket.getTicketNo());
+        article.setTitle(sourceTitle(ticket));
+        article.setSlug(sourceSlug(ticket));
+        article.setCategory(ticket.getCategory() == null || ticket.getCategory().isBlank()
+                ? "未分类" : ticket.getCategory().trim());
+        article.setContent(sourceContent(ticket, resolutionSummary, verificationResult));
+        article.setStatus(KnowledgeStatus.DRAFT);
+        article.setVersion(0);
+        article.setViewCount(0L);
+        article.setCreatedAt(LocalDateTime.now());
+        article.setUpdatedAt(article.getCreatedAt());
+        try {
+            knowledgeMapper.insert(article);
+        } catch (DataIntegrityViolationException ex) {
+            KnowledgeArticle concurrent = findBySourceTicketForUpdate(ticket.getId(), tenantId);
+            if (concurrent != null) return new KnowledgeDraftResult(concurrent, false);
+            throw new BusinessException("知识草稿创建冲突，请刷新后重试");
+        }
+        articleVersionService.record(article, authorId, "CREATED_FROM_TICKET");
+        auditLogService.record(tenantId, authorId, "KNOWLEDGE_ARTICLE", article.getId(),
+                "KNOWLEDGE_DRAFT_CREATED_FROM_TICKET", null, snapshot(article),
+                "从工单 " + ticket.getTicketNo() + " 沉淀知识草稿");
+        return new KnowledgeDraftResult(article, true);
+    }
+
+    private KnowledgeArticle findBySourceTicketForUpdate(Long sourceTicketId, Long tenantId) {
+        return knowledgeMapper.selectOne(new LambdaQueryWrapper<KnowledgeArticle>()
+                .eq(KnowledgeArticle::getTenantId, tenantId)
+                .eq(KnowledgeArticle::getSourceTicketId, sourceTicketId)
+                .last("FOR UPDATE"));
     }
 
     @Transactional
@@ -226,7 +286,44 @@ public class KnowledgeService {
         snapshot.put("category", article.getCategory());
         snapshot.put("content", article.getContent());
         snapshot.put("status", article.getStatus() == null ? null : article.getStatus().name());
+        snapshot.put("sourceTicketId", article.getSourceTicketId());
+        snapshot.put("sourceTicketNo", article.getSourceTicketNo());
         return snapshot;
+    }
+
+    private String sourceTitle(Ticket ticket) {
+        String base = requiredText(ticket.getTitle(), "工单标题", TITLE_MAX_LENGTH);
+        String suffix = "｜解决方案";
+        return base.length() + suffix.length() <= TITLE_MAX_LENGTH
+                ? base + suffix : base.substring(0, TITLE_MAX_LENGTH - suffix.length()) + suffix;
+    }
+
+    private String sourceSlug(Ticket ticket) {
+        String ticketPart = ticket.getTicketNo() == null || ticket.getTicketNo().isBlank()
+                ? String.valueOf(ticket.getId())
+                : ticket.getTicketNo().toLowerCase().replaceAll("[^a-z0-9]+", "-")
+                        .replaceAll("(^-|-$)", "");
+        return "solution-" + ticketPart + "-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private String sourceContent(Ticket ticket, String resolutionSummary, String verificationResult) {
+        StringBuilder content = new StringBuilder();
+        appendSection(content, "问题现象", ticket.getDescription(), "未记录问题现象");
+        appendSection(content, "影响范围", ticket.getImpactScope(), "未记录影响范围");
+        appendSection(content, "处理前尝试", ticket.getAttemptedActions(), "未记录处理前尝试");
+        appendSection(content, "解决方案", resolutionSummary, null);
+        appendSection(content, "验证结果", verificationResult, null);
+        content.append("\n## 来源与复用说明\n\n")
+                .append("本草稿由工单 ").append(ticket.getTicketNo()).append(" 的已验收解决方案生成。")
+                .append("发布前请移除一次性账号、地址和其他敏感信息，并补充适用范围。\n");
+        return requiredText(content.toString(), "内容", CONTENT_MAX_LENGTH);
+    }
+
+    private void appendSection(StringBuilder content, String heading, String value, String fallback) {
+        content.append("## ").append(heading).append("\n\n");
+        if (value == null || value.isBlank()) content.append(fallback == null ? "—" : fallback);
+        else content.append(value.trim());
+        content.append("\n\n");
     }
 
     private String requiredText(String value, String label, int maxLength) {
@@ -243,4 +340,6 @@ public class KnowledgeService {
     public record CreateArticleCommand(String title, String slug, String category, String content) { }
 
     public record UpdateArticleCommand(String title, String slug, String category, String content) { }
+
+    public record KnowledgeDraftResult(KnowledgeArticle article, boolean created) { }
 }

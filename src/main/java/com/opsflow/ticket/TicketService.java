@@ -348,7 +348,10 @@ public class TicketService {
                 throw new BusinessException("工单 " + ticket.getTicketNo() + " 需要由申请人逐项验收解决方案");
             }
 
-            if (statusChanged) ticket.setStatus(targetStatus);
+            if (statusChanged) {
+                ticket.setStatus(targetStatus);
+                if (targetStatus == TicketStatus.IN_PROGRESS) ticket.setConfirmedAt(null);
+            }
             if (priorityChanged) ticket.setPriority(targetPriority);
             ticket.setUpdatedAt(LocalDateTime.now());
             if (ticketMapper.updateById(ticket) == 0) {
@@ -386,7 +389,7 @@ public class TicketService {
             throw new BusinessException("解决方案必须由工单申请人确认");
         }
         ticket.setStatus(target);
-        if (target == TicketStatus.RESOLVED) ticket.setConfirmedAt(LocalDateTime.now());
+        if (target == TicketStatus.IN_PROGRESS) ticket.setConfirmedAt(null);
         ticket.setUpdatedAt(LocalDateTime.now());
         if (ticketMapper.updateById(ticket) == 0) {
             throw new BusinessException("工单已被其他人更新，请刷新后重试");

@@ -20,7 +20,7 @@ export const assetEnvironmentLabels = Object.freeze({ PRODUCTION: '生产', STAG
 export const assetStatusLabels = Object.freeze({ ACTIVE: '运行中', MAINTENANCE: '维护中', RETIRED: '已退役' })
 export const assetCriticalityLabels = Object.freeze({ CRITICAL: '核心', HIGH: '高', MEDIUM: '中', LOW: '低' })
 export const assetRelationLabels = Object.freeze({ DEPENDS_ON: '依赖', RUNS_ON: '运行于', CONNECTS_TO: '连接', BACKED_BY: '由…支撑', MONITORS: '监控' })
-export const articleVersionChangeLabels = Object.freeze({ CREATED: '创建文章', UPDATED: '编辑内容', PUBLISHED: '发布状态', ARCHIVED: '归档状态', RESTORED: '恢复状态', BACKFILL: '历史初始化', VERSION_RESTORED: '恢复历史版本' })
+export const articleVersionChangeLabels = Object.freeze({ CREATED: '创建文章', CREATED_FROM_TICKET: '由工单沉淀', UPDATED: '编辑内容', PUBLISHED: '发布状态', ARCHIVED: '归档状态', RESTORED: '恢复状态', BACKFILL: '历史初始化', VERSION_RESTORED: '恢复历史版本' })
 export const ticketSortLabels = Object.freeze({ PRIORITY_DESC: '优先级最高', SLA_ASC: 'SLA 最近', UPDATED_DESC: '最近更新', CREATED_DESC: '最新创建', CREATED_ASC: '最早创建' })
 export const ticketSortOptions = Object.freeze(Object.entries(ticketSortLabels).map(([value, label]) => ({ value, label })))
 export const reportRangeOptions = Object.freeze([7, 14, 30].map(value => ({ value, label: `近 ${value} 天` })))
