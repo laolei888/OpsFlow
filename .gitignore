@@ -41,3 +41,6 @@ coverage/
 test-results/
 quality/reports/
 *.hprof
+
+# Generated private deliverables (resume/contact details)
+deliverables/

@@ -1,6 +1,36 @@
 # OpsFlow API quality gates
 
-This directory contains four executable quality gates that run against a live OpsFlow stack.
+This directory contains executable quality gates and repeatable demo-data tooling for a live OpsFlow stack.
+
+## Final acceptance
+
+`final-acceptance.mjs` checks application health, the built frontend, the public status page, JSON 401
+protection, OpenAPI availability, and—when credentials are supplied—critical authenticated modules.
+
+```bash
+node quality/final-acceptance.mjs
+
+$env:OPSFLOW_ACCEPTANCE_USERNAME = "your-admin"
+$env:OPSFLOW_ACCEPTANCE_PASSWORD = "your-password"
+node quality/final-acceptance.mjs --strict-auth
+```
+
+When production intentionally disables springdoc, add `--skip-openapi` and run the separate contract
+guard against a build or staging environment where `/api-docs` is enabled.
+
+## Repeatable demo data
+
+`demo-seed.mjs` creates one coherent VPN support story spanning CMDB, support groups, service catalog,
+knowledge, tickets, and service requests. It is name/idempotency-key based and only targets localhost
+unless `OPSFLOW_DEMO_ALLOW_REMOTE=true` is explicitly set.
+
+```bash
+node quality/demo-seed.mjs --dry-run
+
+$env:OPSFLOW_DEMO_USERNAME = "your-admin"
+$env:OPSFLOW_DEMO_PASSWORD = "your-password"
+node quality/demo-seed.mjs
+```
 
 ## OpenAPI contract guard
 

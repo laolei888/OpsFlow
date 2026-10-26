@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1120" role="img" aria-labelledby="title desc">
+  <title id="title">OpsFlow 系统架构图</title>
+  <desc id="desc">展示用户入口、安全网关、领域模块、异步消息、数据基础设施、可观测性和交付链路。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="blueCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/>
+      <stop offset="1" stop-color="#1e40af"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#f59e0b"/>
+    </marker>
+    <style>
+      .title { font: 700 30px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #f8fafc; }
+      .subtitle { font: 400 14px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #94a3b8; }
+      .layer { font: 700 13px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #38bdf8; letter-spacing: 1px; }
+      .head { font: 700 17px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #f8fafc; }
+      .body { font: 400 13px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #cbd5e1; }
+      .small { font: 400 12px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #94a3b8; }
+      .chip { font: 600 12px "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #e2e8f0; }
+      .flow { fill: none; stroke: #38bdf8; stroke-width: 2.5; marker-end: url(#arrowBlue); }
+      .async { fill: none; stroke: #f59e0b; stroke-width: 2.5; stroke-dasharray: 7 6; marker-end: url(#arrowAmber); }
+      .bus { fill: none; stroke: #64748b; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="1120" fill="url(#bg)"/>
+  <circle cx="1260" cy="80" r="190" fill="#1d4ed8" opacity="0.07"/>
+  <circle cx="80" cy="1040" r="230" fill="#0ea5e9" opacity="0.06"/>
+
+  <text class="title" x="72" y="54">OpsFlow 企业级工单与知识协同平台</text>
+  <text class="subtitle" x="72" y="80">模块化单体 · 多租户 ITSM · 可靠异步消息 · 可观测与灾备治理</text>
+  <text class="small" x="1368" y="54" text-anchor="end">Java 17 / Spring Boot 3 / Vue 3</text>
+
+  <!-- connectors are intentionally drawn before components -->
+  <path class="flow" d="M320 158 V202"/>
+  <path class="flow" d="M720 158 V202"/>
+  <path class="flow" d="M1120 158 V202"/>
+  <path class="flow" d="M720 292 V332"/>
+  <path class="flow" d="M720 432 V482"/>
+  <path class="async" d="M720 712 V752"/>
+  <path class="flow" d="M720 852 V892"/>
+  <path class="bus" d="M340 712 V732 H1100 V712"/>
+  <path class="async" d="M340 732 V752"/>
+  <path class="async" d="M1100 732 V752"/>
+  <path class="flow" d="M360 992 V1024"/>
+  <path class="flow" d="M720 992 V1024"/>
+  <path class="flow" d="M1080 992 V1024"/>
+
+  <text class="layer" x="30" y="116">01 角色</text>
+  <g filter="url(#shadow)">
+    <rect x="160" y="98" width="320" height="60" rx="16" fill="#172554" stroke="#3b82f6"/>
+    <rect x="560" y="98" width="320" height="60" rx="16" fill="#172554" stroke="#3b82f6"/>
+    <rect x="960" y="98" width="320" height="60" rx="16" fill="#172554" stroke="#3b82f6"/>
+  </g>
+  <text class="head" x="320" y="126" text-anchor="middle">申请人 / 员工</text>
+  <text class="small" x="320" y="147" text-anchor="middle">报障 · 服务申请 · 知识检索</text>
+  <text class="head" x="720" y="126" text-anchor="middle">客服 / 运维</text>
+  <text class="small" x="720" y="147" text-anchor="middle">受理 · 升级 · 事件与变更</text>
+  <text class="head" x="1120" y="126" text-anchor="middle">管理员 / 自动化代理</text>
+  <text class="small" x="1120" y="147" text-anchor="middle">治理 · 审批 · 备份回调</text>
+
+  <text class="layer" x="30" y="222">02 WEB</text>
+  <g filter="url(#shadow)">
+    <rect x="120" y="202" width="1200" height="90" rx="18" fill="url(#blueCard)" stroke="#60a5fa"/>
+  </g>
+  <text class="head" x="170" y="235">Vue 3 管理台</text>
+  <text class="body" x="170" y="261">工单队列 · 运营驾驶舱 · 知识库 · CMDB · 变更发布 · 可靠性中心</text>
+  <rect x="1040" y="220" width="228" height="52" rx="12" fill="#0f172a" opacity="0.78"/>
+  <text class="chip" x="1154" y="243" text-anchor="middle">Vite + Element Plus</text>
+  <text class="small" x="1154" y="262" text-anchor="middle">Spring Boot 静态资源托管</text>
+
+  <text class="layer" x="30" y="352">03 API</text>
+  <g filter="url(#shadow)">
+    <rect x="120" y="332" width="1200" height="100" rx="18" fill="#111f36" stroke="#38bdf8"/>
+  </g>
+  <text class="head" x="170" y="369">Spring MVC / RESTful API</text>
+  <text class="body" x="170" y="397">统一响应 · 参数校验 · 全局异常 · 请求 ID · OpenAPI</text>
+  <g>
+    <rect x="695" y="352" width="135" height="56" rx="12" fill="#0c4a6e"/>
+    <rect x="842" y="352" width="135" height="56" rx="12" fill="#0c4a6e"/>
+    <rect x="989" y="352" width="135" height="56" rx="12" fill="#0c4a6e"/>
+    <rect x="1136" y="352" width="135" height="56" rx="12" fill="#0c4a6e"/>
+    <text class="chip" x="762" y="376" text-anchor="middle">JWT / OIDC</text><text class="small" x="762" y="397" text-anchor="middle">认证与失效</text>
+    <text class="chip" x="909" y="376" text-anchor="middle">RBAC</text><text class="small" x="909" y="397" text-anchor="middle">角色与资源归属</text>
+    <text class="chip" x="1056" y="376" text-anchor="middle">Tenant</text><text class="small" x="1056" y="397" text-anchor="middle">租户数据隔离</text>
+    <text class="chip" x="1203" y="376" text-anchor="middle">Rate Limit</text><text class="small" x="1203" y="397" text-anchor="middle">Redis + 本地降级</text>
+  </g>
+
+  <text class="layer" x="30" y="502">04 领域</text>
+  <rect x="120" y="482" width="1200" height="230" rx="20" fill="#111827" stroke="#334155" stroke-width="2"/>
+  <g filter="url(#shadow)">
+    <rect x="150" y="518" width="350" height="160" rx="16" fill="#172554" stroke="#3b82f6"/>
+    <rect x="545" y="518" width="350" height="160" rx="16" fill="#14332b" stroke="#34d399"/>
+    <rect x="940" y="518" width="350" height="160" rx="16" fill="#3b2812" stroke="#f59e0b"/>
+  </g>
+  <text class="head" x="180" y="550">服务台与知识协同</text>
+  <text class="body" x="180" y="580">工单状态机 · SLA · 支持组</text>
+  <text class="body" x="180" y="606">知识版本 · 服务目录 · 审批</text>
+  <text class="body" x="180" y="632">附件 · 导入导出 · 满意度</text>
+  <text class="small" x="180" y="658">乐观锁 / Idempotency-Key</text>
+
+  <text class="head" x="575" y="550">ITSM 运营域</text>
+  <text class="body" x="575" y="580">CMDB · 告警 · 重大事件</text>
+  <text class="body" x="575" y="606">问题 · 变更 · 发布 · 复盘</text>
+  <text class="body" x="575" y="632">值班升级 · 自动化 · 状态页</text>
+  <text class="small" x="575" y="658">全链路审计与 Webhook</text>
+
+  <text class="head" x="970" y="550">平台可靠性治理</text>
+  <text class="body" x="970" y="580">多渠道通知 · 模板版本</text>
+  <text class="body" x="970" y="606">容量治理 · 灾备计划/演练</text>
+  <text class="body" x="970" y="632">签名备份代理 · 混沌实验</text>
+  <text class="small" x="970" y="658">审批 / 停止条件 / 证据留存</text>
+
+  <text class="layer" x="30" y="772">05 消息</text>
+  <g filter="url(#shadow)">
+    <rect x="120" y="752" width="1200" height="100" rx="18" fill="#2b2113" stroke="#f59e0b"/>
+  </g>
+  <rect x="155" y="773" width="290" height="58" rx="12" fill="#451a03"/>
+  <rect x="575" y="773" width="290" height="58" rx="12" fill="#451a03"/>
+  <rect x="995" y="773" width="290" height="58" rx="12" fill="#451a03"/>
+  <text class="chip" x="300" y="797" text-anchor="middle">Transactional Outbox</text><text class="small" x="300" y="818" text-anchor="middle">业务事务与事件同库提交</text>
+  <text class="chip" x="720" y="797" text-anchor="middle">RabbitMQ</text><text class="small" x="720" y="818" text-anchor="middle">主题交换机与隔离队列</text>
+  <text class="chip" x="1140" y="797" text-anchor="middle">Consumer Governance</text><text class="small" x="1140" y="818" text-anchor="middle">幂等 · 重试 · 死信 · 重放</text>
+
+  <text class="layer" x="30" y="912">06 数据</text>
+  <g filter="url(#shadow)">
+    <rect x="120" y="892" width="1200" height="100" rx="18" fill="#101b2d" stroke="#64748b"/>
+  </g>
+  <g>
+    <rect x="150" y="915" width="250" height="54" rx="12" fill="#1e293b"/><text class="chip" x="275" y="939" text-anchor="middle">MySQL 8.4 + Flyway V53</text><text class="small" x="275" y="959" text-anchor="middle">核心业务与审计数据</text>
+    <rect x="430" y="915" width="220" height="54" rx="12" fill="#1e293b"/><text class="chip" x="540" y="939" text-anchor="middle">Redis 7.4</text><text class="small" x="540" y="959" text-anchor="middle">限流 / 缓存 / 幂等</text>
+    <rect x="680" y="915" width="250" height="54" rx="12" fill="#1e293b"/><text class="chip" x="805" y="939" text-anchor="middle">RustFS / S3</text><text class="small" x="805" y="959" text-anchor="middle">分片上传与对象治理</text>
+    <rect x="960" y="915" width="160" height="54" rx="12" fill="#1e293b"/><text class="chip" x="1040" y="939" text-anchor="middle">ClamAV</text><text class="small" x="1040" y="959" text-anchor="middle">隔离扫描</text>
+    <rect x="1150" y="915" width="140" height="54" rx="12" fill="#1e293b"/><text class="chip" x="1220" y="939" text-anchor="middle">Local FS</text><text class="small" x="1220" y="959" text-anchor="middle">开发降级</text>
+  </g>
+
+  <text class="layer" x="30" y="1044">07 交付</text>
+  <rect x="120" y="1024" width="360" height="62" rx="14" fill="#122a3a" stroke="#22d3ee"/>
+  <rect x="540" y="1024" width="360" height="62" rx="14" fill="#2a1935" stroke="#c084fc"/>
+  <rect x="960" y="1024" width="360" height="62" rx="14" fill="#183020" stroke="#4ade80"/>
+  <text class="chip" x="300" y="1050" text-anchor="middle">OpenTelemetry + Micrometer</text><text class="small" x="300" y="1072" text-anchor="middle">Prometheus · Grafana · Loki · Tempo</text>
+  <text class="chip" x="720" y="1050" text-anchor="middle">Docker Compose</text><text class="small" x="720" y="1072" text-anchor="middle">应用 / 数据库 / 消息 / 存储</text>
+  <text class="chip" x="1140" y="1050" text-anchor="middle">GitHub Actions</text><text class="small" x="1140" y="1072" text-anchor="middle">测试 · Trivy · SBOM · 镜像签名</text>
+
+  <g transform="translate(72 1103)">
+    <line x1="0" y1="0" x2="34" y2="0" stroke="#38bdf8" stroke-width="3"/>
+    <text class="small" x="44" y="4">同步调用 / 数据流</text>
+    <line x1="200" y1="0" x2="234" y2="0" stroke="#f59e0b" stroke-width="3" stroke-dasharray="7 6"/>
+    <text class="small" x="244" y="4">异步事件</text>
+    <text class="small" x="1296" y="4" text-anchor="end">模块化单体部署，领域边界为未来拆分保留空间</text>
+  </g>
+</svg>

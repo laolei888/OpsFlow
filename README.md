@@ -638,10 +638,16 @@ RabbitMQ 异步消息运维接口（ADMIN）：
 curl http://localhost:8081/actuator/health
 ```
 
-## 后续迭代计划
+## 项目交付材料
 
-1. 完成最终验收与演示数据脚本
-2. 整理架构图、项目讲解材料与简历最终版
+- 最终验收脚本：`quality/final-acceptance.mjs`
+- 可重复演示数据：`quality/demo-seed.mjs`
+- 8 分钟演示指南：`docs/demo-guide.md`
+- 项目讲解与面试材料：`docs/project-walkthrough.md`
+- 最终验收报告：`docs/final-acceptance-report.md`
+- 系统架构图：`diagram/opsflow-architecture/opsflow-system-architecture.svg`
+
+当前版本已完成简历项目所需的主业务、可靠性治理、质量门禁和交付材料。后续可选演进方向是云上多副本部署、真实企业身份源/通知通道接入，以及基于实际业务数据的容量压测；这些不属于当前单节点参考实现的完成条件。
 
 通知接口：
 
