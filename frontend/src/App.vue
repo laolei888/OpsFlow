@@ -42,6 +42,7 @@ const StatusPagePublic = defineAsyncComponent(() => import('./components/StatusP
 const SupportGroupCenter = defineAsyncComponent(() => import('./components/SupportGroupCenter.vue'))
 const CustomerSatisfactionCenter = defineAsyncComponent(() => import('./components/CustomerSatisfactionCenter.vue'))
 const IdentityAccessCenter = defineAsyncComponent(() => import('./components/IdentityAccessCenter.vue'))
+const TicketDetailView = defineAsyncComponent(() => import('./views/TicketDetailView.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -566,11 +567,14 @@ const filteredCmdbAssets = computed(() => {
 const cmdbActiveCount = computed(() => cmdbAssets.value.filter(asset => asset.status === 'ACTIVE').length)
 const cmdbCriticalCount = computed(() => cmdbAssets.value.filter(asset => ['CRITICAL', 'HIGH'].includes(asset.criticality) && asset.status !== 'RETIRED').length)
 const availableTicketAssets = computed(() => cmdbAssets.value.filter(asset => asset.status !== 'RETIRED' && !ticketAssetLinks.value.some(link => String(link.assetId) === String(asset.id))))
-const pageEyebrow = computed(() => VIEW_META[activeView.value]?.eyebrow || 'OPSFLOW')
-const pageTitle = computed(() => activeView.value === 'overview'
+const isTicketDetailRoute = computed(() => route.name === 'ticketDetail')
+const pageEyebrow = computed(() => isTicketDetailRoute.value ? 'TICKET COLLABORATION' : VIEW_META[activeView.value]?.eyebrow || 'OPSFLOW')
+const pageTitle = computed(() => isTicketDetailRoute.value ? '工单详情' : activeView.value === 'overview'
   ? '早上好，' + displayName.value
   : VIEW_META[activeView.value]?.title || 'OpsFlow')
-const pageBreadcrumbs = computed(() => breadcrumbsForView(activeView.value))
+const pageBreadcrumbs = computed(() => isTicketDetailRoute.value
+  ? [...breadcrumbsForView('tickets').slice(0, -1), { label: '工单中心', view: 'tickets' }, { label: `工单 #${route.params.ticketId}`, current: true }]
+  : breadcrumbsForView(activeView.value))
 const activeCount = computed(() => dashboardOverview.value?.active ?? tickets.value.filter(ticket => ['OPEN', 'IN_PROGRESS', 'WAITING_CONFIRMATION'].includes(ticket.status)).length)
 const urgentCount = computed(() => dashboardOverview.value?.urgent ?? tickets.value.filter(ticket => ticket.priority === 'URGENT').length)
 const resolvedCount = computed(() => dashboardOverview.value?.resolved ?? tickets.value.filter(ticket => ['RESOLVED', 'CLOSED'].includes(ticket.status)).length)
@@ -1760,35 +1764,15 @@ async function retryWebhookOutbox(event) {
   finally { retryingWebhookOutboxId.value = null }
 }
 async function openTicket(ticket) {
-  selectedTicket.value = ticket
-  showDetail.value = true
-  loadingDetail.value = true
-  try {
-    const recommendationQuery = ticket.category
-      ? 'category=' + encodeURIComponent(ticket.category)
-      : 'keyword=' + encodeURIComponent(ticket.title || '')
-    const [comments, logs, attachments, recommended, assetLinks, uploadCapabilities] = await Promise.all([
-      api('/api/v1/tickets/' + ticket.id + '/comments'),
-      api('/api/v1/tickets/' + ticket.id + '/audit-logs'),
-      api('/api/v1/tickets/' + ticket.id + '/attachments'),
-      api('/api/v1/knowledge/articles?page=1&size=3&' + recommendationQuery),
-      api('/api/v1/cmdb/tickets/' + ticket.id + '/assets'),
-      api('/api/v1/tickets/' + ticket.id + '/attachments/upload-capabilities').catch(() => null)
-    ])
-    ticketComments.value = comments || []
-    ticketAuditLogs.value = logs || []
-    ticketAttachments.value = attachments || []
-    recommendedArticles.value = recommended?.records || []
-    ticketAssetLinks.value = assetLinks || []
-    attachmentUploadCapabilities.value = uploadCapabilities || {
-      enabled: false,
-      simpleUploadMaxBytes: 10 * 1024 * 1024,
-      multipartUploadMaxBytes: 10 * 1024 * 1024,
-      partSize: 8 * 1024 * 1024
-    }
-    ticketAssetSelection.value = ''
-  } catch (err) { error.value = err.message }
-  finally { loadingDetail.value = false }
+  if (!ticket?.id) return
+  showDetail.value = false
+  await router.push({ name: 'ticketDetail', params: { ticketId: ticket.id } })
+}
+
+function handleTicketDetailChanged(updatedTicket) {
+  if (!updatedTicket?.id) return
+  const index = tickets.value.findIndex(item => String(item.id) === String(updatedTicket.id))
+  if (index >= 0) tickets.value.splice(index, 1, updatedTicket)
 }
 
 function closeTicket() {
@@ -3019,6 +3003,21 @@ onMounted(async () => {
 <CapacityPlanningCenter v-else-if="activeView === 'capacity'" :api="api" />
 <DisasterRecoveryCenter v-else-if="activeView === 'disasterRecovery'" :api="api" />
 <ResilienceChaosCenter v-else-if="activeView === 'resilienceChaos'" :api="api" />
+<TicketDetailView
+  v-else-if="activeView === 'tickets' && isTicketDetailRoute"
+  :key="route.params.ticketId"
+  :ticket-id="Number(route.params.ticketId)"
+  :api="api"
+  :download-file="downloadCsv"
+  :user="user"
+  :staff-members="staffMembers"
+  :assets="cmdbAssets"
+  @back="router.push({ name: 'tickets' })"
+  @changed="handleTicketDetailChanged"
+  @notify="notify"
+  @error="error = $event"
+  @navigate="navigateTo"
+/>
 <section v-else-if="activeView === 'tickets'" class="view-panel">
   <div class="section-toolbar">
     <div><p class="eyebrow">WORK QUEUE</p><h2>工作队列</h2></div>

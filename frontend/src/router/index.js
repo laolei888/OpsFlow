@@ -12,6 +12,12 @@ const routes = [
     component: RouteAnchor,
     meta: { view, access: meta.access || 'authenticated' }
   })),
+  {
+    path: '/tickets/:ticketId(\\d+)',
+    name: 'ticketDetail',
+    component: RouteAnchor,
+    meta: { view: 'tickets', access: 'authenticated' }
+  },
   { path: '/:pathMatch(.*)*', redirect: VIEW_META.overview.path }
 ]
 
