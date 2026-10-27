@@ -22,6 +22,9 @@ const eventOptions = [
   ['SERVICE_APPROVAL_REQUIRED', '服务申请待审批'], ['SERVICE_REQUEST_RESULT', '服务申请结果'],
   ['PROBLEM_CREATED', '问题单创建'], ['PROBLEM_STATUS_CHANGED', '问题单状态'],
   ['POSTMORTEM_REVIEW_REQUIRED', '复盘待评审'], ['POSTMORTEM_PUBLISHED', '复盘已发布'],
+  ['KNOWLEDGE_REVIEW_REQUESTED', '知识文章待审核'], ['KNOWLEDGE_REVIEW_APPROVED', '知识审核通过'],
+  ['KNOWLEDGE_REVIEW_REJECTED', '知识审核驳回'], ['KNOWLEDGE_REVIEW_WITHDRAWN', '知识审核撤回'],
+  ['KNOWLEDGE_REVIEW_DUE', '知识到期复核'],
   ['ONCALL_ESCALATION', '值班升级'], ['CAPACITY_THRESHOLD', '容量风险预警'],
   ['REPORT_READY', '报表生成']
 ]

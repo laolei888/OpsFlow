@@ -38,6 +38,9 @@ class KnowledgeServiceTest {
     @Mock
     private KnowledgeArticleVersionService articleVersionService;
 
+    @Mock
+    private KnowledgeReviewNotificationService reviewNotificationService;
+
     @InjectMocks
     private KnowledgeService knowledgeService;
 
@@ -145,6 +148,7 @@ class KnowledgeServiceTest {
         verify(articleVersionService).record(article, 7L, "SUBMITTED_FOR_REVIEW");
         verify(auditLogService).record(eq(3L), eq(7L), eq("KNOWLEDGE_ARTICLE"), eq(6L),
                 eq("KNOWLEDGE_REVIEW_SUBMITTED"), any(), any(), eq("提交知识文章审核"));
+        verify(reviewNotificationService).notifyReviewRequested(article, 7L);
     }
 
     @Test
@@ -185,6 +189,8 @@ class KnowledgeServiceTest {
         assertEquals("内容与步骤完整", published.getReviewComment());
         assertTrue(published.getReviewDueAt().isAfter(LocalDateTime.now().plusDays(179)));
         verify(articleVersionService).record(article, 11L, "REVIEW_APPROVED");
+        verify(reviewNotificationService).notifyReviewDecision(
+                article, 7L, KnowledgeReviewDecision.APPROVE);
     }
 
     @Test
@@ -202,6 +208,8 @@ class KnowledgeServiceTest {
         assertEquals("补充回滚后的验证结果", rejected.getReviewComment());
         assertNull(rejected.getReviewDueAt());
         verify(articleVersionService).record(article, 11L, "REVIEW_REJECTED");
+        verify(reviewNotificationService).notifyReviewDecision(
+                article, null, KnowledgeReviewDecision.REJECT);
     }
 
     @Test
@@ -219,6 +227,7 @@ class KnowledgeServiceTest {
         assertNull(withdrawn.getReviewRequestedBy());
         assertFalse(withdrawn.getSensitiveDataChecked());
         verify(articleVersionService).record(article, 7L, "REVIEW_WITHDRAWN");
+        verify(reviewNotificationService).notifyReviewWithdrawn(article, 7L, 7L);
     }
 
     @Test

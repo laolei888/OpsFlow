@@ -7,7 +7,8 @@ public record OperationsWorkbenchView(Summary summary, List<WorkItem> items, Loc
     public record Summary(long total, long critical, long high, long approvals,
                           long firingAlerts, long activeIncidents,
                           long reliabilityBreaches, long unpublishedNotices,
-                          long postmortemReviews) { }
+                          long postmortemReviews, long knowledgeReviews,
+                          long overdueKnowledgeReviews) { }
 
     public record WorkItem(Long id, String type, String typeLabel, String referenceNo,
                            String title, String description, String priority, String status,

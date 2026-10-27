@@ -56,7 +56,7 @@ OpsFlow 是面向企业 IT 服务管理场景的工单与知识协同平台，�
 
 ## 30 秒项目介绍
 
-“我主要负责 OpsFlow 的 Java 后端。它是一个企业 ITSM 平台，我实现了工单、知识库、SLA、CMDB、通知和审计等模块，并重点处理了多租户权限、状态机与乐观锁、幂等创建、Transactional Outbox + RabbitMQ、对象存储安全和 OpenTelemetry 可观测性。项目使用 Flyway V57 管理数据库，当前有 319 项后端单元/组件测试和 6 项 MySQL 集成测试，可以用 Docker Compose 一键运行。”
+“我主要负责 OpsFlow 的 Java 后端。它是一个企业 ITSM 平台，我实现了工单、知识库、SLA、CMDB、通知和审计等模块，并重点处理了多租户权限、状态机与乐观锁、幂等创建、Transactional Outbox + RabbitMQ、对象存储安全和 OpenTelemetry 可观测性。知识库使用质量门禁、管理员审核、异步结果通知和 180 天复核提醒形成治理闭环。项目使用 Flyway V57 管理数据库，当前有 323 项后端单元/组件测试和 6 项 MySQL 集成测试，可以用 Docker Compose 一键运行。”
 
 ## 常见追问
 
@@ -74,7 +74,7 @@ OpsFlow 是面向企业 IT 服务管理场景的工单与知识协同平台，�
 
 ### 如何证明项目可运行？
 
-仓库提供 Docker Compose、OpenAPI 契约检查、安全/可观测性烟测、最终验收脚本和可重复演示数据；数据库迁移到 V57，并有 319 项后端单元/组件测试及 6 项真实 MySQL 集成测试。
+仓库提供 Docker Compose、OpenAPI 契约检查、安全/可观测性烟测、最终验收脚本和可重复演示数据；数据库迁移到 V57，并有 323 项后端单元/组件测试、22 项前端测试及 6 项真实 MySQL 集成测试。
 
 ### 项目还有哪些边界？
 

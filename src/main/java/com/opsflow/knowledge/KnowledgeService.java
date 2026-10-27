@@ -32,6 +32,7 @@ public class KnowledgeService {
     private final KnowledgeMapper knowledgeMapper;
     private final AuditLogService auditLogService;
     private final KnowledgeArticleVersionService articleVersionService;
+    private final KnowledgeReviewNotificationService reviewNotificationService;
 
     public Page<KnowledgeArticle> search(long page, long size, String keyword, String category, Long tenantId) {
         return search(page, size, keyword, category, tenantId, false);
@@ -232,6 +233,7 @@ public class KnowledgeService {
         articleVersionService.record(article, actorId, "SUBMITTED_FOR_REVIEW");
         auditLogService.record(tenantId, actorId, "KNOWLEDGE_ARTICLE", article.getId(),
                 "KNOWLEDGE_REVIEW_SUBMITTED", before, snapshot(article), "提交知识文章审核");
+        reviewNotificationService.notifyReviewRequested(article, actorId);
         return article;
     }
 
@@ -251,6 +253,7 @@ public class KnowledgeService {
         if (!admin && !Objects.equals(article.getReviewRequestedBy(), actorId)) {
             throw new BusinessException("只有提交审核的人或管理员可以撤回");
         }
+        Long requesterId = article.getReviewRequestedBy();
         Map<String, Object> before = snapshot(article);
         article.setStatus(KnowledgeStatus.DRAFT);
         article.setReviewRequestedBy(null);
@@ -263,6 +266,7 @@ public class KnowledgeService {
         articleVersionService.record(article, actorId, "REVIEW_WITHDRAWN");
         auditLogService.record(tenantId, actorId, "KNOWLEDGE_ARTICLE", article.getId(),
                 "KNOWLEDGE_REVIEW_WITHDRAWN", before, snapshot(article), "撤回知识文章审核");
+        reviewNotificationService.notifyReviewWithdrawn(article, requesterId, actorId);
         return article;
     }
 
@@ -384,6 +388,7 @@ public class KnowledgeService {
         if (decision == KnowledgeReviewDecision.REJECT && normalizedComment == null) {
             throw new BusinessException("驳回审核时必须填写原因");
         }
+        Long requesterId = article.getReviewRequestedBy();
         Map<String, Object> before = snapshot(article);
         LocalDateTime now = LocalDateTime.now();
         boolean approved = decision == KnowledgeReviewDecision.APPROVE;
@@ -398,6 +403,7 @@ public class KnowledgeService {
         articleVersionService.record(article, reviewerId, approved ? "REVIEW_APPROVED" : "REVIEW_REJECTED");
         auditLogService.record(tenantId, reviewerId, "KNOWLEDGE_ARTICLE", article.getId(), action,
                 before, snapshot(article), approved ? "审核通过并发布知识文章" : "驳回知识文章审核：" + normalizedComment);
+        reviewNotificationService.notifyReviewDecision(article, requesterId, decision);
         return article;
     }
 

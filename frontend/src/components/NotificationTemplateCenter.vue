@@ -26,6 +26,9 @@ const eventOptions = [
   ['INCIDENT_DECLARED', '重大事件宣布'], ['INCIDENT_STATUS_CHANGED', '重大事件状态'],
   ['CHANGE_APPROVAL_REQUIRED', '变更待审批'], ['CHANGE_STATUS_CHANGED', '变更状态'],
   ['MONITORING_ALERT', '监控告警'], ['ONCALL_ESCALATION', '值班升级'],
+  ['KNOWLEDGE_REVIEW_REQUESTED', '知识文章待审核'], ['KNOWLEDGE_REVIEW_APPROVED', '知识审核通过'],
+  ['KNOWLEDGE_REVIEW_REJECTED', '知识审核驳回'], ['KNOWLEDGE_REVIEW_WITHDRAWN', '知识审核撤回'],
+  ['KNOWLEDGE_REVIEW_DUE', '知识到期复核'],
   ['CAPACITY_THRESHOLD', '容量风险预警'], ['REPORT_READY', '报表生成']
 ]
 const enabledCount = computed(() => templates.value.filter(item => item.enabled).length)

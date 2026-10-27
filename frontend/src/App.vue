@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { breadcrumbsForView, VIEW_META, viewPath } from './app/navigation'
@@ -2958,15 +2958,31 @@ function publishArticle(article) {
   knowledgeReviewPanel.value?.openSubmit(article)
 }
 
-function handleKnowledgeReviewChanged(article) {
+async function handleKnowledgeReviewChanged(article) {
   const localArticle = articles.value.find(item => item.id === article.id)
   if (localArticle) Object.assign(localArticle, article)
-  else articles.value.unshift(article)
+  else {
+    articles.value.unshift(article)
+    articleTotal.value += 1
+  }
+  if (canBulkUpdate.value) {
+    try {
+      knowledgeAnalytics.value = await api('/api/v1/knowledge/articles/analytics')
+    } catch (err) {
+      error.value = err.message
+    }
+  }
 }
 
 async function handleKnowledgeArticleSaved(article) {
-  handleKnowledgeReviewChanged(article)
-  await loadDashboard()
+  await handleKnowledgeReviewChanged(article)
+}
+
+async function navigateFromWorkbench(targetView, item) {
+  activeView.value = targetView
+  if (targetView !== 'knowledge') return
+  await nextTick()
+  knowledgeReviewPanel.value?.open(item?.id)
 }
 
 async function archiveArticle(article) {
@@ -3064,7 +3080,7 @@ onMounted(async () => {
 
 
 <CustomerSatisfactionCenter v-else-if="activeView === 'satisfaction'" :api="api" :is-staff="canBulkUpdate" />
-<OperationsWorkbench v-else-if="activeView === 'workbench'" :api="api" :is-admin="isAdmin" @navigate="activeView = $event" />
+<OperationsWorkbench v-else-if="activeView === 'workbench'" :api="api" :is-admin="isAdmin" @navigate="navigateFromWorkbench" />
 <SupportGroupCenter v-else-if="activeView === 'supportGroups'" :api="api" :staff-members="staffMembers" :is-admin="isAdmin" />
 <AttachmentSecurityCenter v-else-if="activeView === 'attachmentSecurity'" :api="api" />
 <AsyncMessageCenter v-else-if="activeView === 'messages'" :api="api" :download-csv="downloadCsv" />
@@ -3275,9 +3291,11 @@ onMounted(async () => {
       ref="knowledgeReviewPanel"
       :api="api"
       :articles="articles"
+      :analytics="knowledgeAnalytics"
       :is-admin="isAdmin"
       :user-id="user?.id"
       @changed="handleKnowledgeReviewChanged"
+      @open-article="openArticle"
       @notify="notify"
       @error="error = $event"
     />

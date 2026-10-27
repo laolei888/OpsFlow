@@ -15,6 +15,9 @@ import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentMapper;
 import com.opsflow.incident.IncidentSeverity;
 import com.opsflow.incident.IncidentStatus;
+import com.opsflow.knowledge.KnowledgeArticle;
+import com.opsflow.knowledge.KnowledgeMapper;
+import com.opsflow.knowledge.KnowledgeStatus;
 import com.opsflow.postmortem.IncidentPostmortem;
 import com.opsflow.postmortem.IncidentPostmortemMapper;
 import com.opsflow.postmortem.PostmortemStatus;
@@ -52,6 +55,7 @@ class OperationsWorkbenchServiceTest {
     @Mock private SloBreachEventMapper breachMapper;
     @Mock private StatusPageIncidentMapper statusIncidentMapper;
     @Mock private IncidentPostmortemMapper postmortemMapper;
+    @Mock private KnowledgeMapper knowledgeMapper;
     @InjectMocks private OperationsWorkbenchService service;
 
     @Test
@@ -64,19 +68,25 @@ class OperationsWorkbenchServiceTest {
         when(breachMapper.selectList(any())).thenReturn(List.of(breach(now.minusHours(1))));
         when(statusIncidentMapper.selectList(any())).thenReturn(List.of(notice(now)));
         when(postmortemMapper.selectList(any())).thenReturn(List.of(postmortem(now.minusMinutes(30))));
+        when(knowledgeMapper.selectList(any()))
+                .thenReturn(List.of(knowledgePending(now.minusMinutes(45))))
+                .thenReturn(List.of(knowledgeOverdue(now.minusDays(2))));
 
         OperationsWorkbenchView view = service.overview(9L, true, null, null, 100);
 
-        assertThat(view.summary().total()).isEqualTo(7);
-        assertThat(view.summary().approvals()).isEqualTo(3);
+        assertThat(view.summary().total()).isEqualTo(9);
+        assertThat(view.summary().approvals()).isEqualTo(4);
         assertThat(view.summary().postmortemReviews()).isEqualTo(1);
+        assertThat(view.summary().knowledgeReviews()).isEqualTo(1);
+        assertThat(view.summary().overdueKnowledgeReviews()).isEqualTo(1);
         assertThat(view.summary().critical()).isEqualTo(4);
         assertThat(view.summary().firingAlerts()).isEqualTo(1);
         assertThat(view.items()).extracting(OperationsWorkbenchView.WorkItem::priority)
                 .startsWith("CRITICAL", "CRITICAL", "CRITICAL", "CRITICAL");
         assertThat(view.items()).extracting(OperationsWorkbenchView.WorkItem::type)
                 .containsExactlyInAnyOrder("SERVICE_APPROVAL", "CHANGE_APPROVAL", "FIRING_ALERT",
-                        "ACTIVE_INCIDENT", "SLO_BREACH", "STATUS_DRAFT", "POSTMORTEM_REVIEW");
+                        "ACTIVE_INCIDENT", "SLO_BREACH", "STATUS_DRAFT", "POSTMORTEM_REVIEW",
+                        "KNOWLEDGE_REVIEW", "KNOWLEDGE_REVIEW_OVERDUE");
     }
 
     @Test
@@ -95,6 +105,7 @@ class OperationsWorkbenchServiceTest {
         verify(changeRequestMapper, never()).selectList(any());
         verify(statusIncidentMapper, never()).selectList(any());
         verify(postmortemMapper, never()).selectList(any());
+        verify(knowledgeMapper, never()).selectList(any());
     }
 
     private ServiceRequest serviceRequest(LocalDateTime createdAt) {
@@ -157,5 +168,21 @@ class OperationsWorkbenchServiceTest {
         review.setTitle("订单服务重大事件复盘"); review.setExecutiveSummary("连接池耗尽导致订单服务异常");
         review.setStatus(PostmortemStatus.IN_REVIEW); review.setSubmittedAt(createdAt); review.setUpdatedAt(createdAt);
         return review;
+    }
+
+    private KnowledgeArticle knowledgePending(LocalDateTime createdAt) {
+        KnowledgeArticle article = new KnowledgeArticle();
+        article.setId(8L); article.setTenantId(9L); article.setSlug("vpn-guide");
+        article.setTitle("VPN 故障排查指南"); article.setStatus(KnowledgeStatus.PENDING_REVIEW);
+        article.setReviewRequestedAt(createdAt); article.setUpdatedAt(createdAt);
+        return article;
+    }
+
+    private KnowledgeArticle knowledgeOverdue(LocalDateTime reviewDueAt) {
+        KnowledgeArticle article = new KnowledgeArticle();
+        article.setId(9L); article.setTenantId(9L); article.setSlug("account-guide");
+        article.setTitle("账号权限申请指南"); article.setStatus(KnowledgeStatus.PUBLISHED);
+        article.setReviewDueAt(reviewDueAt); article.setUpdatedAt(reviewDueAt.minusDays(180));
+        return article;
     }
 }

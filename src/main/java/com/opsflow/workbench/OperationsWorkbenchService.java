@@ -16,6 +16,9 @@ import com.opsflow.incident.Incident;
 import com.opsflow.incident.IncidentMapper;
 import com.opsflow.incident.IncidentSeverity;
 import com.opsflow.incident.IncidentStatus;
+import com.opsflow.knowledge.KnowledgeArticle;
+import com.opsflow.knowledge.KnowledgeMapper;
+import com.opsflow.knowledge.KnowledgeStatus;
 import com.opsflow.postmortem.IncidentPostmortem;
 import com.opsflow.postmortem.IncidentPostmortemMapper;
 import com.opsflow.postmortem.PostmortemStatus;
@@ -55,6 +58,7 @@ public class OperationsWorkbenchService {
     private final SloBreachEventMapper breachMapper;
     private final StatusPageIncidentMapper statusIncidentMapper;
     private final IncidentPostmortemMapper postmortemMapper;
+    private final KnowledgeMapper knowledgeMapper;
 
     public OperationsWorkbenchView overview(Long tenantId, boolean admin, String types,
                                              String priorities, Integer requestedLimit) {
@@ -64,6 +68,8 @@ public class OperationsWorkbenchService {
             appendChangeApprovals(all, tenantId);
             appendUnpublishedNotices(all, tenantId);
             appendPostmortemReviews(all, tenantId);
+            appendKnowledgeReviews(all, tenantId);
+            appendOverdueKnowledgeReviews(all, tenantId);
         }
         appendFiringAlerts(all, tenantId);
         appendActiveIncidents(all, tenantId);
@@ -171,12 +177,39 @@ public class OperationsWorkbenchService {
                         review.getSubmittedAt(), review.getUpdatedAt())));
     }
 
+    private void appendKnowledgeReviews(List<OperationsWorkbenchView.WorkItem> items, Long tenantId) {
+        knowledgeMapper.selectList(new LambdaQueryWrapper<KnowledgeArticle>()
+                        .eq(KnowledgeArticle::getTenantId, tenantId)
+                        .eq(KnowledgeArticle::getStatus, KnowledgeStatus.PENDING_REVIEW)
+                        .orderByAsc(KnowledgeArticle::getReviewRequestedAt)
+                        .last("LIMIT " + SOURCE_LIMIT))
+                .forEach(article -> items.add(item(article.getId(), "KNOWLEDGE_REVIEW", "知识待审核",
+                        article.getSlug(), article.getTitle(), "质量门禁已通过，等待管理员审核发布",
+                        "HIGH", article.getStatus().name(), "knowledge", "审核文章", true,
+                        article.getReviewRequestedAt(), article.getUpdatedAt())));
+    }
+
+    private void appendOverdueKnowledgeReviews(List<OperationsWorkbenchView.WorkItem> items, Long tenantId) {
+        knowledgeMapper.selectList(new LambdaQueryWrapper<KnowledgeArticle>()
+                        .eq(KnowledgeArticle::getTenantId, tenantId)
+                        .eq(KnowledgeArticle::getStatus, KnowledgeStatus.PUBLISHED)
+                        .isNotNull(KnowledgeArticle::getReviewDueAt)
+                        .le(KnowledgeArticle::getReviewDueAt, LocalDateTime.now())
+                        .orderByAsc(KnowledgeArticle::getReviewDueAt)
+                        .last("LIMIT " + SOURCE_LIMIT))
+                .forEach(article -> items.add(item(article.getId(), "KNOWLEDGE_REVIEW_OVERDUE", "知识到期复核",
+                        article.getSlug(), article.getTitle(), "文章已超过 180 天复核周期，请确认内容仍然有效",
+                        "HIGH", article.getStatus().name(), "knowledge", "复核文章", true,
+                        article.getReviewDueAt(), article.getUpdatedAt())));
+    }
+
     private OperationsWorkbenchView.Summary summary(List<OperationsWorkbenchView.WorkItem> items) {
         return new OperationsWorkbenchView.Summary(items.size(), countPriority(items, "CRITICAL"),
-                countPriority(items, "HIGH"), countTypes(items, "SERVICE_APPROVAL", "CHANGE_APPROVAL", "POSTMORTEM_REVIEW"),
+                countPriority(items, "HIGH"), countTypes(items, "SERVICE_APPROVAL", "CHANGE_APPROVAL", "POSTMORTEM_REVIEW", "KNOWLEDGE_REVIEW"),
                 countTypes(items, "FIRING_ALERT"), countTypes(items, "ACTIVE_INCIDENT"),
                 countTypes(items, "SLO_BREACH"), countTypes(items, "STATUS_DRAFT"),
-                countTypes(items, "POSTMORTEM_REVIEW"));
+                countTypes(items, "POSTMORTEM_REVIEW"), countTypes(items, "KNOWLEDGE_REVIEW"),
+                countTypes(items, "KNOWLEDGE_REVIEW_OVERDUE"));
     }
 
     private long countPriority(List<OperationsWorkbenchView.WorkItem> items, String priority) {

@@ -1,15 +1,16 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { articleStatusLabels } from '../constants/domain'
+import { knowledgeQueueCount, reviewDueLabel, reviewWaitLabel } from '../app/knowledgeGovernance'
 
 const props = defineProps({
   api: { type: Function, required: true },
   articles: { type: Array, default: () => [] },
+  analytics: { type: Object, default: null },
   isAdmin: { type: Boolean, default: false },
   userId: { type: [Number, String], default: null }
 })
 
-const emit = defineEmits(['changed', 'notify', 'error'])
+const emit = defineEmits(['changed', 'notify', 'error', 'open-article'])
 const showPanel = ref(false)
 const submitTarget = ref(null)
 const reviewTarget = ref(null)
@@ -26,6 +27,10 @@ const drafts = computed(() => props.articles.filter(article => article.status ==
 const pending = computed(() => props.articles.filter(article => article.status === 'PENDING_REVIEW'))
 const overdue = computed(() => props.articles.filter(article => article.status === 'PUBLISHED'
   && article.reviewDueAt && new Date(article.reviewDueAt).getTime() <= Date.now()))
+const draftCount = computed(() => knowledgeQueueCount(props.analytics, 'draftArticles', drafts.value))
+const pendingCount = computed(() => knowledgeQueueCount(props.analytics, 'pendingReviewArticles', pending.value))
+const overdueCount = computed(() => knowledgeQueueCount(props.analytics, 'overdueReviewArticles', overdue.value))
+const governanceCount = computed(() => pendingCount.value + overdueCount.value)
 const checklistComplete = computed(() => checklist.sensitiveDataChecked
   && checklist.scopeDefined && checklist.verificationStepsComplete)
 
@@ -38,6 +43,18 @@ function formatDate(value) {
 
 function report(error) {
   emit('error', error?.message || '知识审核操作失败')
+}
+
+function open(articleId = null) {
+  showPanel.value = true
+  if (!articleId) return
+  const target = props.articles.find(article => String(article.id) === String(articleId))
+  if (target?.status === 'DRAFT') openSubmit(target)
+}
+
+function preview(article) {
+  showPanel.value = false
+  emit('open-article', article)
 }
 
 function openSubmit(article) {
@@ -114,13 +131,13 @@ async function withdraw(article) {
   }
 }
 
-defineExpose({ openSubmit })
+defineExpose({ openSubmit, open })
 </script>
 
 <template>
   <button type="button" class="review-launcher" @click="showPanel = true">
     <span>知识治理</span>
-    <b v-if="pending.length">{{ pending.length }}</b>
+    <b v-if="governanceCount">{{ governanceCount }}</b>
   </button>
 
   <div v-if="showPanel" class="review-overlay" @click.self="showPanel = false">
@@ -131,9 +148,9 @@ defineExpose({ openSubmit })
       </header>
 
       <div class="review-summary">
-        <article><span>待完善草稿</span><strong>{{ drafts.length }}</strong></article>
-        <article :class="{ attention: pending.length }"><span>等待审核</span><strong>{{ pending.length }}</strong></article>
-        <article :class="{ attention: overdue.length }"><span>到期复核</span><strong>{{ overdue.length }}</strong></article>
+        <article><span>待完善草稿</span><strong>{{ draftCount }}</strong></article>
+        <article :class="{ attention: pendingCount }"><span>等待审核</span><strong>{{ pendingCount }}</strong></article>
+        <article :class="{ attention: overdueCount }"><span>到期复核</span><strong>{{ overdueCount }}</strong></article>
       </div>
 
       <section>
@@ -142,7 +159,7 @@ defineExpose({ openSubmit })
         <div v-else class="review-list">
           <article v-for="article in drafts" :key="article.id">
             <div><strong>{{ article.title }}</strong><small>{{ article.category }} · {{ article.content?.length || 0 }} 字</small></div>
-            <button type="button" @click="openSubmit(article)">提交审核</button>
+            <div class="row-buttons"><button type="button" class="secondary" @click="preview(article)">预览</button><button type="button" @click="openSubmit(article)">提交审核</button></div>
           </article>
         </div>
       </section>
@@ -152,9 +169,10 @@ defineExpose({ openSubmit })
         <p v-if="!pending.length" class="empty-note">当前没有等待审核的文章。</p>
         <div v-else class="review-list pending-list">
           <article v-for="article in pending" :key="article.id">
-            <div><strong>{{ article.title }}</strong><small>提交于 {{ formatDate(article.reviewRequestedAt) }} · 用户 #{{ article.reviewRequestedBy }}</small></div>
+            <div><strong>{{ article.title }}</strong><small>{{ reviewWaitLabel(article.reviewRequestedAt) }} · 提交于 {{ formatDate(article.reviewRequestedAt) }} · 用户 #{{ article.reviewRequestedBy }}</small></div>
             <span class="quality-pass">3 / 3 已检查</span>
             <div class="row-buttons">
+              <button type="button" class="secondary" @click="preview(article)">预览</button>
               <button v-if="canWithdraw(article)" type="button" class="secondary" @click="withdraw(article)">撤回</button>
               <button v-if="isAdmin" type="button" class="danger" @click="openReview(article, 'REJECT')">驳回</button>
               <button v-if="isAdmin" type="button" @click="openReview(article, 'APPROVE')">批准</button>
@@ -169,7 +187,7 @@ defineExpose({ openSubmit })
         <div v-else class="review-list overdue-list">
           <article v-for="article in overdue" :key="article.id">
             <div><strong>{{ article.title }}</strong><small>复核日期 {{ formatDate(article.reviewDueAt) }}</small></div>
-            <span>{{ articleStatusLabels[article.status] }}</span>
+            <div class="overdue-actions"><span>{{ reviewDueLabel(article.reviewDueAt) }}</span><button type="button" class="secondary" @click="preview(article)">查看</button></div>
           </article>
         </div>
       </section>
@@ -201,4 +219,5 @@ defineExpose({ openSubmit })
 
 <style scoped>
 .review-launcher{position:fixed;right:28px;bottom:28px;z-index:120;display:flex;align-items:center;gap:8px;border:0;border-radius:999px;background:#17345f;color:#fff;padding:11px 16px;box-shadow:0 12px 32px rgba(23,52,95,.28);font-weight:750;cursor:pointer}.review-launcher b{display:grid;place-items:center;min-width:21px;height:21px;border-radius:999px;background:#ffdf91;color:#704d00;font-size:10px}.review-overlay,.review-modal-overlay{position:fixed;inset:0;background:rgba(13,22,38,.48);z-index:210}.review-overlay{display:flex;justify-content:flex-end}.review-drawer{width:min(680px,94vw);height:100%;overflow:auto;background:#f6f8fb;padding:24px;box-shadow:-24px 0 60px rgba(14,27,49,.2)}header{display:flex;justify-content:space-between;align-items:flex-start}header span,.queue-heading span{color:#8490a2;font-size:9px;font-weight:850;letter-spacing:.12em}header h2,.queue-heading h3{margin:4px 0 0;color:#1f2c40}header>button{border:0;background:none;font-size:25px;color:#768298;cursor:pointer}.review-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0}.review-summary article{padding:14px;border:1px solid #e1e6ee;border-radius:12px;background:#fff}.review-summary article.attention{border-color:#f2cf91;background:#fffaf0}.review-summary span{display:block;color:#78869a;font-size:10px}.review-summary strong{display:block;margin-top:5px;font-size:24px;color:#20324d}.review-drawer>section{margin-top:14px;padding:17px;border:1px solid #e2e7ef;border-radius:14px;background:#fff}.queue-heading{display:flex;justify-content:space-between;gap:14px;align-items:flex-end}.queue-heading small,.empty-note{color:#8c97a7;font-size:10px}.empty-note{text-align:center;padding:18px}.review-list{display:grid;gap:9px;margin-top:14px}.review-list article{display:flex;align-items:center;gap:10px;border-top:1px solid #edf0f4;padding-top:10px}.review-list article>div:first-child{display:flex;flex:1;min-width:0;flex-direction:column}.review-list strong{font-size:12px;color:#344054}.review-list small{margin-top:3px;color:#8b95a5;font-size:9px}.review-list button,.review-modal footer button{border:0;border-radius:8px;background:#2f6fed;color:#fff;padding:8px 11px;font-weight:700;cursor:pointer}.row-buttons{display:flex;gap:6px}.review-list button.secondary,.review-modal footer button.secondary{background:#edf1f6;color:#536176}.review-list button.danger,.review-modal footer button.danger{background:#c64d45}.quality-pass{white-space:nowrap;border-radius:999px;background:#eaf7ef;color:#23764a;padding:4px 7px;font-size:9px}.overdue-list article>span{color:#b54708;background:#fff4e5;border-radius:999px;padding:4px 7px;font-size:9px}.review-modal-overlay{z-index:230;display:grid;place-items:center;padding:20px}.review-modal{width:min(540px,100%);display:flex;flex-direction:column;gap:14px;border-radius:16px;background:#fff;padding:24px;box-shadow:0 25px 70px rgba(14,27,49,.28)}.review-modal>p{margin:0;color:#344054;font-weight:750}.review-modal>label{display:flex;align-items:flex-start;gap:9px;color:#4e5b6f;font-size:12px;line-height:1.5}.review-modal>label:has(textarea){flex-direction:column}.review-modal textarea{width:100%;box-sizing:border-box;border:1px solid #dbe1e9;border-radius:9px;padding:10px;font:inherit;resize:vertical}.review-modal>small{color:#8792a2}.review-modal footer{display:flex;justify-content:flex-end;gap:8px}.review-modal footer button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:700px){.review-summary{grid-template-columns:1fr}.review-list article{align-items:flex-start;flex-wrap:wrap}.row-buttons{width:100%;justify-content:flex-end}}
+.overdue-actions{display:flex!important;flex:0 0 auto!important;flex-direction:row!important;align-items:center;gap:7px}.overdue-actions>span{color:#b54708;background:#fff4e5;border-radius:999px;padding:4px 7px;font-size:9px;white-space:nowrap}
 </style>
