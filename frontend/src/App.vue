@@ -7,6 +7,8 @@ import AppSidebar from './components/layout/AppSidebar.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
 import PageErrorBanner from './components/common/PageErrorBanner.vue'
 import ToastMessage from './components/common/ToastMessage.vue'
+import KnowledgeEditorModal from './components/KnowledgeEditorModal.vue'
+import KnowledgeReviewPanel from './components/KnowledgeReviewPanel.vue'
 import LoginView from './views/LoginView.vue'
 import RoleWorkspaceHome from './views/RoleWorkspaceHome.vue'
 import { useSessionStore } from './stores/session'
@@ -171,6 +173,8 @@ const savedViewForm = reactive({ name: '', visibility: 'PRIVATE' })
 const knowledgeKeyword = ref('')
 const knowledgeCategory = ref('')
 const knowledgeStatus = ref('')
+const knowledgeEditorModal = ref(null)
+const knowledgeReviewPanel = ref(null)
 const tickets = ref([])
 const articles = ref([])
 const knowledgeAnalytics = ref(null)
@@ -312,6 +316,8 @@ const auditLabels = { CREATED: '创建工单', KNOWLEDGE_ARTICLE_CREATED: '创�
 Object.assign(auditLabels, {
   RESOLUTION_SUBMITTED: '提交解决方案', RESOLUTION_CONFIRMED: '申请人确认解决', RESOLUTION_REOPENED: '申请人退回处理',
   KNOWLEDGE_DRAFT_CREATED: '沉淀知识草稿', KNOWLEDGE_DRAFT_CREATED_FROM_TICKET: '由工单生成知识草稿',
+  KNOWLEDGE_REVIEW_SUBMITTED: '提交知识审核', KNOWLEDGE_REVIEW_APPROVED: '批准知识文章',
+  KNOWLEDGE_REVIEW_REJECTED: '驳回知识文章', KNOWLEDGE_REVIEW_WITHDRAWN: '撤回知识审核',
   ALERT_SOURCE_CREATED: '创建告警源', ALERT_SOURCE_UPDATED: '更新告警源', ALERT_SOURCE_KEY_ROTATED: '轮换告警密钥',
   ALERT_RULE_CREATED: '创建告警规则', ALERT_RULE_UPDATED: '更新告警规则',
   ALERT_SILENCE_CREATED: '创建静默窗口', ALERT_SILENCE_UPDATED: '更新静默窗口', ALERT_SILENCE_DELETED: '删除静默窗口',
@@ -370,6 +376,10 @@ const auditActionOptions = [
   { value: 'KNOWLEDGE_ARTICLE_RESTORED', label: '恢复知识文章' },  { value: 'KNOWLEDGE_ARTICLE_VERSION_RESTORED', label: '恢复历史版本' },
   { value: 'KNOWLEDGE_DRAFT_CREATED', label: '沉淀知识草稿' },
   { value: 'KNOWLEDGE_DRAFT_CREATED_FROM_TICKET', label: '由工单生成知识草稿' },
+  { value: 'KNOWLEDGE_REVIEW_SUBMITTED', label: '提交知识审核' },
+  { value: 'KNOWLEDGE_REVIEW_APPROVED', label: '批准知识文章' },
+  { value: 'KNOWLEDGE_REVIEW_REJECTED', label: '驳回知识文章' },
+  { value: 'KNOWLEDGE_REVIEW_WITHDRAWN', label: '撤回知识审核' },
   { value: 'TICKET_UPDATED', label: '编辑工单' },
   { value: 'RESOLUTION_SUBMITTED', label: '提交解决方案' },
   { value: 'RESOLUTION_CONFIRMED', label: '申请人确认解决' },
@@ -2795,14 +2805,13 @@ async function advanceTicket(ticket) {
 }
 
 function openArticleModal(article = null) {
-  editingArticle.value = article
-  Object.assign(articleForm, {
-    title: article?.title || '',
-    slug: article?.slug || '',
-    category: article?.category || '网络',
-    content: article?.content || ''
-  })
-  showArticleModal.value = true
+  if (article && article.status !== 'DRAFT') {
+    error.value = article.status === 'PENDING_REVIEW'
+      ? '审核中的文章不能编辑，请先从知识治理面板撤回审核'
+      : '只有草稿可以编辑；已发布文章需要先归档并恢复为草稿'
+    return
+  }
+  knowledgeEditorModal.value?.open(article)
 }
 
 function closeArticleModal() {
@@ -2932,12 +2941,11 @@ async function saveArticle() {
       })
       notify('知识文章已更新')
     } else {
-      const article = await api('/api/v1/knowledge/articles', {
+      await api('/api/v1/knowledge/articles', {
         method: 'POST',
         body: JSON.stringify(articleForm)
       })
-      await api('/api/v1/knowledge/articles/' + article.id + '/publish', { method: 'POST' })
-      notify('知识文章已发布')
+      notify('知识文章已保存为草稿，请完成质量检查后提交审核')
     }
     closeArticleModal()
     await loadDashboard()
@@ -2945,13 +2953,20 @@ async function saveArticle() {
   finally { savingArticle.value = false }
 }
 
-async function publishArticle(article) {
+function publishArticle(article) {
   if (!canBulkUpdate.value || article.status !== 'DRAFT') return
-  try {
-    await api('/api/v1/knowledge/articles/' + article.id + '/publish', { method: 'POST' })
-    await loadDashboard()
-    notify('知识文章已发布')
-  } catch (err) { error.value = err.message }
+  knowledgeReviewPanel.value?.openSubmit(article)
+}
+
+function handleKnowledgeReviewChanged(article) {
+  const localArticle = articles.value.find(item => item.id === article.id)
+  if (localArticle) Object.assign(localArticle, article)
+  else articles.value.unshift(article)
+}
+
+async function handleKnowledgeArticleSaved(article) {
+  handleKnowledgeReviewChanged(article)
+  await loadDashboard()
 }
 
 async function archiveArticle(article) {
@@ -3247,6 +3262,25 @@ onMounted(async () => {
       </form>
     </div>
     <IdentityAccessCenter v-if="token && activeView === 'team'" :api="api" :users="teamUsers" />
+    <KnowledgeEditorModal
+      v-if="token"
+      ref="knowledgeEditorModal"
+      :api="api"
+      @saved="handleKnowledgeArticleSaved"
+      @notify="notify"
+      @error="error = $event"
+    />
+    <KnowledgeReviewPanel
+      v-if="token && activeView === 'knowledge' && canBulkUpdate"
+      ref="knowledgeReviewPanel"
+      :api="api"
+      :articles="articles"
+      :is-admin="isAdmin"
+      :user-id="user?.id"
+      @changed="handleKnowledgeReviewChanged"
+      @notify="notify"
+      @error="error = $event"
+    />
     <NotificationPreferenceModal :visible="showNotificationPreferences" :api="api" @close="showNotificationPreferences = false" @saved="notify('通知偏好已保存')" />
     <ToastMessage :message="toast" />
   </main>

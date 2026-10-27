@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -58,7 +59,11 @@ public class KnowledgeAnalyticsService {
                 articles.size(),
                 articles.stream().filter(item -> item.getStatus() == KnowledgeStatus.PUBLISHED).count(),
                 articles.stream().filter(item -> item.getStatus() == KnowledgeStatus.DRAFT).count(),
+                articles.stream().filter(item -> item.getStatus() == KnowledgeStatus.PENDING_REVIEW).count(),
                 articles.stream().filter(item -> item.getStatus() == KnowledgeStatus.ARCHIVED).count(),
+                articles.stream().filter(item -> item.getStatus() == KnowledgeStatus.PUBLISHED
+                        && item.getReviewDueAt() != null
+                        && !item.getReviewDueAt().isAfter(LocalDateTime.now())).count(),
                 articles.stream().mapToLong(item -> item.getViewCount() == null ? 0L : item.getViewCount()).sum(),
                 totalFeedback,
                 helpfulRate,
@@ -96,7 +101,9 @@ public class KnowledgeAnalyticsService {
             long totalArticles,
             long publishedArticles,
             long draftArticles,
+            long pendingReviewArticles,
             long archivedArticles,
+            long overdueReviewArticles,
             long totalViews,
             long totalFeedback,
             int helpfulRate,

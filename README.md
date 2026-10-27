@@ -22,9 +22,9 @@
 - 工单创建、分页查询、详情查询
 - 工单状态机流转与乐观锁版本字段
 - 解决方案与用户验收闭环：处理人必须提交解决类型、解决摘要和验证证据后才能请求确认；只有原申请人可确认解决或带原因退回，列表快捷操作、批量更新和通用状态接口均不能绕过验收，全部动作写入审计链路
-- 工单知识沉淀闭环：经过申请人确认的解决方案可一键生成结构化知识草稿，自动整理问题、影响、既有尝试、解决步骤和验证证据；来源工单在租户内唯一关联并支持并发幂等，草稿必须人工脱敏、编辑和发布后才对申请人可见
+- 工单知识沉淀闭环：经过申请人确认的解决方案可一键生成结构化知识草稿，自动整理问题、影响、既有尝试、解决步骤和验证证据；来源工单在租户内唯一关联并支持并发幂等，草稿必须完成脱敏、适用范围和验证步骤检查，并由管理员审核通过后才对申请人可见
 - 工单按 tenantId 隔离查询
-- 知识库草稿、发布、归档状态模型；AGENT/ADMIN 可编辑、发布、归档和恢复，按租户隔离并记录审计；支持分类/状态筛选、全文阅读、阅读量统计、文章版本历史、用户帮助度反馈和知识库运营分析看板
+- 知识库 `DRAFT → PENDING_REVIEW → PUBLISHED` 审核状态机：AGENT/ADMIN 维护草稿并提交质量门禁，只有 ADMIN 可批准发布或填写原因驳回；提交人可撤回审核，发布后自动生成 180 天复核期限，所有动作保留文章版本与租户审计；同时支持归档恢复、分类/状态筛选、全文阅读、帮助度反馈和运营分析看板
 - 知识库按关键词和分类检索
 - Redis 分布式窗口限流；Redis 不可用时降级到本地内存
 - 参数校验、统一异常响应
@@ -137,7 +137,7 @@ http://localhost:3200。部署到共享环境前必须通过 `GRAFANA_ADMIN_PASS
 ## 测试与持续集成
 
 ```bash
-# 295 个业务单元测试，不依赖 Docker
+# 319 个业务单元/组件测试，不依赖 Docker
 mvn test
 
 # 完整验收：单元测试 + MySQL 8.4 集成测试
@@ -161,7 +161,7 @@ node quality/observability-smoke.mjs
 docker compose --profile quality run --rm --no-deps k6
 ```
 
-`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V53 的全部 Flyway
+`mvn verify` 默认由 Testcontainers 启动一次性 MySQL，验证从 V1 到 V57 的全部 Flyway
 迁移、CSAT 唯一约束和数据库聚合查询。Windows 本地环境若无法访问 Docker 命名管道，
 也可以通过 `OPSFLOW_IT_JDBC_URL`、`OPSFLOW_IT_DB_USERNAME` 和
 `OPSFLOW_IT_DB_PASSWORD` 指向一个独立测试数据库；不要连接生产库。
@@ -236,7 +236,7 @@ Compose 同时配置了 MySQL/Redis 健康检查与容器日志轮转。
     POST /api/v1/tickets/{id}/resolution/submit               # AGENT/ADMIN 提交解决包
     POST /api/v1/tickets/{id}/resolution/decision             # 原申请人确认或退回
 
-知识沉淀：已验收工单的解决包可以生成一篇内部 `DRAFT` 文章。系统保留来源工单并阻止重复生成，但不会自动发布，客服需要检查敏感信息、完善适用范围后再手动发布。
+知识沉淀：已验收工单的解决包可以生成一篇内部 `DRAFT` 文章。系统保留来源工单并阻止重复生成，但不会自动发布。客服完成脱敏、适用范围和验证步骤三项质量检查后提交审核；管理员批准后进入 `PUBLISHED`，驳回则返回 `DRAFT` 并保留原因。
 
     GET  /api/v1/tickets/{id}/knowledge-draft                 # 查询来源工单已关联的知识文章
     POST /api/v1/tickets/{id}/knowledge-draft                 # AGENT/ADMIN 幂等生成知识草稿
@@ -293,16 +293,23 @@ Web 管理台使用三步式工单向导：先选择场景并匹配知识文章�
 curl -H "Authorization: Bearer <TOKEN>" http://localhost:8081/api/v1/tickets
 ```
 
-创建知识库草稿并发布：
+创建知识库草稿、提交审核并由管理员批准：
 
 ```bash
 curl -X POST http://localhost:8081/api/v1/knowledge/articles \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"title":"VPN 排障指南","slug":"vpn-troubleshooting","category":"网络","content":"检查账号状态、网络和客户端配置。"}'
+  -d '{"title":"VPN 排障指南","slug":"vpn-troubleshooting","category":"网络","content":"适用于公司员工在账号有效且互联网连接正常时无法连接 VPN 的场景。依次检查客户端版本、账号状态、本地网络、DNS 与网关路由；修复后重新连接并访问内部测试地址，确认日志中无认证或路由错误。若验证失败，恢复原配置并升级给网络支持组。"}'
 
-curl -X POST -H "Authorization: Bearer <TOKEN>" \
-  http://localhost:8081/api/v1/knowledge/articles/1/publish
+curl -X POST http://localhost:8081/api/v1/knowledge/articles/1/submit-review \
+  -H "Authorization: Bearer <AGENT_OR_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"sensitiveDataChecked":true,"scopeDefined":true,"verificationStepsComplete":true}'
+
+curl -X POST http://localhost:8081/api/v1/knowledge/articles/1/review \
+  -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"APPROVE","comment":"适用范围和验证步骤完整"}'
 ```
 
 附件接口：

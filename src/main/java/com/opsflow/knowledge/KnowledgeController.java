@@ -100,8 +100,38 @@ public class KnowledgeController {
     @PostMapping("/{id}/publish")
     public ApiResponse<KnowledgeArticle> publish(@PathVariable Long id,
                                                  @AuthenticationPrincipal AuthPrincipal principal) {
-        requireStaff(principal);
+        requireAdmin(principal);
         return ApiResponse.ok(knowledgeService.publish(id, principal.id(), principal.tenantId()), "文章已发布");
+    }
+
+    @PostMapping("/{id}/submit-review")
+    public ApiResponse<KnowledgeArticle> submitReview(@PathVariable Long id,
+                                                       @Valid @RequestBody ReviewChecklistRequest request,
+                                                       @AuthenticationPrincipal AuthPrincipal principal) {
+        requireStaff(principal);
+        KnowledgeService.ReviewChecklist checklist = new KnowledgeService.ReviewChecklist(
+                request.sensitiveDataChecked(), request.scopeDefined(), request.verificationStepsComplete());
+        return ApiResponse.ok(knowledgeService.submitForReview(id, checklist, principal.id(), principal.tenantId()),
+                "文章已提交审核");
+    }
+
+    @PostMapping("/{id}/review")
+    public ApiResponse<KnowledgeArticle> review(@PathVariable Long id,
+                                                @Valid @RequestBody ReviewDecisionRequest request,
+                                                @AuthenticationPrincipal AuthPrincipal principal) {
+        requireAdmin(principal);
+        return ApiResponse.ok(knowledgeService.review(id, request.decision(), request.comment(),
+                        principal.id(), principal.tenantId()),
+                request.decision() == KnowledgeReviewDecision.APPROVE ? "文章已审核发布" : "文章已驳回草稿");
+    }
+
+    @PostMapping("/{id}/withdraw-review")
+    public ApiResponse<KnowledgeArticle> withdrawReview(@PathVariable Long id,
+                                                         @AuthenticationPrincipal AuthPrincipal principal) {
+        requireStaff(principal);
+        return ApiResponse.ok(knowledgeService.withdrawReview(id, principal.id(),
+                        principal.hasAnyRole("ADMIN"), principal.tenantId()),
+                "文章已撤回为草稿");
     }
 
     @PostMapping("/{id}/archive")
@@ -124,6 +154,12 @@ public class KnowledgeController {
         }
     }
 
+    private void requireAdmin(AuthPrincipal principal) {
+        if (principal == null || !principal.hasAnyRole("ADMIN")) {
+            throw new BusinessException("只有管理员可以审核并发布知识文章");
+        }
+    }
+
     public record FeedbackRequest(@NotNull Boolean helpful) { }
     public record UpdateArticleRequest(
             @NotBlank @Size(max = 160) String title,
@@ -136,4 +172,13 @@ public class KnowledgeController {
             @NotBlank @Size(max = 180) String slug,
             @NotBlank @Size(max = 64) String category,
             @NotBlank @Size(max = 50000) String content) { }
+
+    public record ReviewChecklistRequest(
+            @NotNull Boolean sensitiveDataChecked,
+            @NotNull Boolean scopeDefined,
+            @NotNull Boolean verificationStepsComplete) { }
+
+    public record ReviewDecisionRequest(
+            @NotNull KnowledgeReviewDecision decision,
+            @Size(max = 1000) String comment) { }
 }

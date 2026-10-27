@@ -25,6 +25,9 @@ public class KnowledgeService {
     private static final int SLUG_MAX_LENGTH = 180;
     private static final int CATEGORY_MAX_LENGTH = 64;
     private static final int CONTENT_MAX_LENGTH = 50000;
+    private static final int REVIEW_COMMENT_MAX_LENGTH = 1000;
+    private static final int MIN_REVIEW_CONTENT_LENGTH = 80;
+    private static final int REVIEW_VALID_DAYS = 180;
 
     private final KnowledgeMapper knowledgeMapper;
     private final AuditLogService auditLogService;
@@ -79,6 +82,7 @@ public class KnowledgeService {
         article.setCategory(category);
         article.setContent(content);
         article.setStatus(KnowledgeStatus.DRAFT);
+        initializeReviewFields(article);
         article.setVersion(0);
         article.setViewCount(0L);
         article.setCreatedAt(LocalDateTime.now());
@@ -126,6 +130,7 @@ public class KnowledgeService {
                 ? "未分类" : ticket.getCategory().trim());
         article.setContent(sourceContent(ticket, resolutionSummary, verificationResult));
         article.setStatus(KnowledgeStatus.DRAFT);
+        initializeReviewFields(article);
         article.setVersion(0);
         article.setViewCount(0L);
         article.setCreatedAt(LocalDateTime.now());
@@ -154,6 +159,9 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeArticle update(Long id, UpdateArticleCommand command, Long actorId, Long tenantId) {
         KnowledgeArticle article = getManageable(id, tenantId);
+        if (article.getStatus() != KnowledgeStatus.DRAFT) {
+            throw new BusinessException("只有草稿可以编辑；审核中或已发布文章需先退回草稿");
+        }
         Map<String, Object> before = snapshot(article);
         String title = requiredText(command.title(), "标题", TITLE_MAX_LENGTH);
         String slug = requiredText(command.slug(), "Slug", SLUG_MAX_LENGTH);
@@ -188,12 +196,74 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeArticle publish(Long id, Long actorId, Long tenantId) {
         KnowledgeArticle article = getManageable(id, tenantId);
-        if (article.getStatus() == KnowledgeStatus.ARCHIVED) {
-            throw new BusinessException("归档文章不能直接发布，请先恢复为草稿");
+        if (article.getStatus() != KnowledgeStatus.PENDING_REVIEW) {
+            throw new BusinessException("文章必须先提交审核，不能直接发布");
         }
-        if (article.getStatus() == KnowledgeStatus.PUBLISHED) return article;
-        return changeStatus(article, KnowledgeStatus.PUBLISHED, actorId, tenantId,
-                "KNOWLEDGE_ARTICLE_PUBLISHED", "发布知识文章");
+        return reviewArticle(article, KnowledgeReviewDecision.APPROVE, null, actorId, tenantId);
+    }
+
+    @Transactional
+    public KnowledgeArticle submitForReview(Long id, ReviewChecklist checklist, Long actorId, Long tenantId) {
+        KnowledgeArticle article = getManageable(id, tenantId);
+        if (article.getStatus() != KnowledgeStatus.DRAFT) {
+            throw new BusinessException("只有草稿可以提交审核");
+        }
+        if (article.getContent() == null || article.getContent().trim().length() < MIN_REVIEW_CONTENT_LENGTH) {
+            throw new BusinessException("文章内容至少需要 " + MIN_REVIEW_CONTENT_LENGTH + " 个字符才能提交审核");
+        }
+        if (checklist == null || !checklist.sensitiveDataChecked()
+                || !checklist.scopeDefined() || !checklist.verificationStepsComplete()) {
+            throw new BusinessException("请完成脱敏、适用范围和验证步骤三项质量检查");
+        }
+        Map<String, Object> before = snapshot(article);
+        LocalDateTime now = LocalDateTime.now();
+        article.setStatus(KnowledgeStatus.PENDING_REVIEW);
+        article.setReviewRequestedBy(actorId);
+        article.setReviewRequestedAt(now);
+        article.setReviewedBy(null);
+        article.setReviewedAt(null);
+        article.setReviewComment(null);
+        article.setSensitiveDataChecked(true);
+        article.setScopeDefined(true);
+        article.setVerificationStepsComplete(true);
+        article.setReviewDueAt(null);
+        article.setUpdatedAt(now);
+        updateArticle(article, "文章已被其他人更新，请刷新后重试");
+        articleVersionService.record(article, actorId, "SUBMITTED_FOR_REVIEW");
+        auditLogService.record(tenantId, actorId, "KNOWLEDGE_ARTICLE", article.getId(),
+                "KNOWLEDGE_REVIEW_SUBMITTED", before, snapshot(article), "提交知识文章审核");
+        return article;
+    }
+
+    @Transactional
+    public KnowledgeArticle review(Long id, KnowledgeReviewDecision decision, String comment,
+                                   Long reviewerId, Long tenantId) {
+        KnowledgeArticle article = getManageable(id, tenantId);
+        return reviewArticle(article, decision, comment, reviewerId, tenantId);
+    }
+
+    @Transactional
+    public KnowledgeArticle withdrawReview(Long id, Long actorId, boolean admin, Long tenantId) {
+        KnowledgeArticle article = getManageable(id, tenantId);
+        if (article.getStatus() != KnowledgeStatus.PENDING_REVIEW) {
+            throw new BusinessException("只有审核中的文章可以撤回");
+        }
+        if (!admin && !Objects.equals(article.getReviewRequestedBy(), actorId)) {
+            throw new BusinessException("只有提交审核的人或管理员可以撤回");
+        }
+        Map<String, Object> before = snapshot(article);
+        article.setStatus(KnowledgeStatus.DRAFT);
+        article.setReviewRequestedBy(null);
+        article.setReviewRequestedAt(null);
+        article.setSensitiveDataChecked(false);
+        article.setScopeDefined(false);
+        article.setVerificationStepsComplete(false);
+        article.setUpdatedAt(LocalDateTime.now());
+        updateArticle(article, "文章已被其他人更新，请刷新后重试");
+        articleVersionService.record(article, actorId, "REVIEW_WITHDRAWN");
+        auditLogService.record(tenantId, actorId, "KNOWLEDGE_ARTICLE", article.getId(),
+                "KNOWLEDGE_REVIEW_WITHDRAWN", before, snapshot(article), "撤回知识文章审核");
+        return article;
     }
 
     @Transactional
@@ -210,6 +280,7 @@ public class KnowledgeService {
         if (article.getStatus() != KnowledgeStatus.ARCHIVED) {
             throw new BusinessException("只有已归档文章可以恢复");
         }
+        initializeReviewFields(article);
         return changeStatus(article, KnowledgeStatus.DRAFT, actorId, tenantId,
                 "KNOWLEDGE_ARTICLE_RESTORED", "恢复知识文章为草稿");
     }
@@ -231,6 +302,9 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeArticle restoreVersion(Long id, Long versionId, Long actorId, Long tenantId) {
         KnowledgeArticle article = getManageable(id, tenantId);
+        if (article.getStatus() != KnowledgeStatus.DRAFT) {
+            throw new BusinessException("只有草稿可以恢复历史版本");
+        }
         KnowledgeArticleVersion version = articleVersionService.getForArticle(id, versionId, tenantId);
         String title = requiredText(version.getTitle(), "标题", TITLE_MAX_LENGTH);
         String slug = requiredText(version.getSlug(), "Slug", SLUG_MAX_LENGTH);
@@ -288,7 +362,59 @@ public class KnowledgeService {
         snapshot.put("status", article.getStatus() == null ? null : article.getStatus().name());
         snapshot.put("sourceTicketId", article.getSourceTicketId());
         snapshot.put("sourceTicketNo", article.getSourceTicketNo());
+        snapshot.put("reviewRequestedBy", article.getReviewRequestedBy());
+        snapshot.put("reviewRequestedAt", article.getReviewRequestedAt());
+        snapshot.put("reviewedBy", article.getReviewedBy());
+        snapshot.put("reviewedAt", article.getReviewedAt());
+        snapshot.put("reviewComment", article.getReviewComment());
+        snapshot.put("sensitiveDataChecked", article.getSensitiveDataChecked());
+        snapshot.put("scopeDefined", article.getScopeDefined());
+        snapshot.put("verificationStepsComplete", article.getVerificationStepsComplete());
+        snapshot.put("reviewDueAt", article.getReviewDueAt());
         return snapshot;
+    }
+
+    private KnowledgeArticle reviewArticle(KnowledgeArticle article, KnowledgeReviewDecision decision,
+                                           String comment, Long reviewerId, Long tenantId) {
+        if (article.getStatus() != KnowledgeStatus.PENDING_REVIEW) {
+            throw new BusinessException("当前文章不在待审核状态");
+        }
+        if (decision == null) throw new BusinessException("请选择审核结论");
+        String normalizedComment = optionalText(comment, "审核意见", REVIEW_COMMENT_MAX_LENGTH);
+        if (decision == KnowledgeReviewDecision.REJECT && normalizedComment == null) {
+            throw new BusinessException("驳回审核时必须填写原因");
+        }
+        Map<String, Object> before = snapshot(article);
+        LocalDateTime now = LocalDateTime.now();
+        boolean approved = decision == KnowledgeReviewDecision.APPROVE;
+        article.setStatus(approved ? KnowledgeStatus.PUBLISHED : KnowledgeStatus.DRAFT);
+        article.setReviewedBy(reviewerId);
+        article.setReviewedAt(now);
+        article.setReviewComment(normalizedComment);
+        article.setReviewDueAt(approved ? now.plusDays(REVIEW_VALID_DAYS) : null);
+        article.setUpdatedAt(now);
+        updateArticle(article, "文章已被其他人更新，请刷新后重试");
+        String action = approved ? "KNOWLEDGE_REVIEW_APPROVED" : "KNOWLEDGE_REVIEW_REJECTED";
+        articleVersionService.record(article, reviewerId, approved ? "REVIEW_APPROVED" : "REVIEW_REJECTED");
+        auditLogService.record(tenantId, reviewerId, "KNOWLEDGE_ARTICLE", article.getId(), action,
+                before, snapshot(article), approved ? "审核通过并发布知识文章" : "驳回知识文章审核：" + normalizedComment);
+        return article;
+    }
+
+    private void updateArticle(KnowledgeArticle article, String conflictMessage) {
+        if (knowledgeMapper.updateById(article) == 0) throw new BusinessException(conflictMessage);
+    }
+
+    private void initializeReviewFields(KnowledgeArticle article) {
+        article.setReviewRequestedBy(null);
+        article.setReviewRequestedAt(null);
+        article.setReviewedBy(null);
+        article.setReviewedAt(null);
+        article.setReviewComment(null);
+        article.setSensitiveDataChecked(false);
+        article.setScopeDefined(false);
+        article.setVerificationStepsComplete(false);
+        article.setReviewDueAt(null);
     }
 
     private String sourceTitle(Ticket ticket) {
@@ -337,9 +463,21 @@ public class KnowledgeService {
         return normalized;
     }
 
+    private String optionalText(String value, String label, int maxLength) {
+        if (value == null || value.trim().isBlank()) return null;
+        String normalized = value.trim();
+        if (normalized.length() > maxLength) {
+            throw new BusinessException(label + "不能超过 " + maxLength + " 个字符");
+        }
+        return normalized;
+    }
+
     public record CreateArticleCommand(String title, String slug, String category, String content) { }
 
     public record UpdateArticleCommand(String title, String slug, String category, String content) { }
 
     public record KnowledgeDraftResult(KnowledgeArticle article, boolean created) { }
+
+    public record ReviewChecklist(boolean sensitiveDataChecked, boolean scopeDefined,
+                                  boolean verificationStepsComplete) { }
 }

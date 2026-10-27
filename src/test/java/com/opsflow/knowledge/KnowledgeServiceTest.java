@@ -16,7 +16,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -77,7 +80,7 @@ class KnowledgeServiceTest {
 
     @Test
     void restoresHistoricalContentAndKeepsCurrentStatus() {
-        KnowledgeArticle article = article(5L, KnowledgeStatus.PUBLISHED);
+        KnowledgeArticle article = article(5L, KnowledgeStatus.DRAFT);
         KnowledgeArticleVersion historical = new KnowledgeArticleVersion();
         historical.setId(12L);
         historical.setArticleId(5L);
@@ -97,7 +100,7 @@ class KnowledgeServiceTest {
         assertEquals("旧版 VPN 指南", restored.getTitle());
         assertEquals("vpn-guide-old", restored.getSlug());
         assertEquals("旧版排障步骤", restored.getContent());
-        assertEquals(KnowledgeStatus.PUBLISHED, restored.getStatus());
+        assertEquals(KnowledgeStatus.DRAFT, restored.getStatus());
         verify(articleVersionService).record(article, 7L, "VERSION_RESTORED");
         verify(auditLogService).record(eq(3L), eq(7L), eq("KNOWLEDGE_ARTICLE"),
                 eq(5L), eq("KNOWLEDGE_ARTICLE_VERSION_RESTORED"), any(), any(), eq("恢复历史版本"));
@@ -123,6 +126,99 @@ class KnowledgeServiceTest {
 
         verify(knowledgeMapper, never()).updateById(any(KnowledgeArticle.class));
         verify(auditLogService, never()).record(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void submitsDraftForReviewAfterAllQualityChecksPass() {
+        KnowledgeArticle article = article(6L, KnowledgeStatus.DRAFT);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(article);
+        when(knowledgeMapper.updateById(article)).thenReturn(1);
+
+        KnowledgeArticle submitted = knowledgeService.submitForReview(6L,
+                new KnowledgeService.ReviewChecklist(true, true, true), 7L, 3L);
+
+        assertEquals(KnowledgeStatus.PENDING_REVIEW, submitted.getStatus());
+        assertEquals(7L, submitted.getReviewRequestedBy());
+        assertTrue(submitted.getSensitiveDataChecked());
+        assertTrue(submitted.getScopeDefined());
+        assertTrue(submitted.getVerificationStepsComplete());
+        verify(articleVersionService).record(article, 7L, "SUBMITTED_FOR_REVIEW");
+        verify(auditLogService).record(eq(3L), eq(7L), eq("KNOWLEDGE_ARTICLE"), eq(6L),
+                eq("KNOWLEDGE_REVIEW_SUBMITTED"), any(), any(), eq("提交知识文章审核"));
+    }
+
+    @Test
+    void rejectsReviewSubmissionWhenChecklistIsIncomplete() {
+        KnowledgeArticle article = article(7L, KnowledgeStatus.DRAFT);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(article);
+
+        assertThrows(BusinessException.class, () -> knowledgeService.submitForReview(7L,
+                new KnowledgeService.ReviewChecklist(true, false, true), 7L, 3L));
+
+        assertEquals(KnowledgeStatus.DRAFT, article.getStatus());
+        verify(knowledgeMapper, never()).updateById(any(KnowledgeArticle.class));
+    }
+
+    @Test
+    void refusesDirectPublishBeforeReviewSubmission() {
+        KnowledgeArticle article = article(8L, KnowledgeStatus.DRAFT);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(article);
+
+        assertThrows(BusinessException.class, () -> knowledgeService.publish(8L, 9L, 3L));
+
+        verify(knowledgeMapper, never()).updateById(any(KnowledgeArticle.class));
+    }
+
+    @Test
+    void approvesPendingArticleAndSchedulesPeriodicReview() {
+        KnowledgeArticle article = article(9L, KnowledgeStatus.PENDING_REVIEW);
+        article.setReviewRequestedBy(7L);
+        article.setReviewRequestedAt(LocalDateTime.now().minusHours(1));
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(article);
+        when(knowledgeMapper.updateById(article)).thenReturn(1);
+
+        KnowledgeArticle published = knowledgeService.review(
+                9L, KnowledgeReviewDecision.APPROVE, "内容与步骤完整", 11L, 3L);
+
+        assertEquals(KnowledgeStatus.PUBLISHED, published.getStatus());
+        assertEquals(11L, published.getReviewedBy());
+        assertEquals("内容与步骤完整", published.getReviewComment());
+        assertTrue(published.getReviewDueAt().isAfter(LocalDateTime.now().plusDays(179)));
+        verify(articleVersionService).record(article, 11L, "REVIEW_APPROVED");
+    }
+
+    @Test
+    void rejectionRequiresReasonAndReturnsArticleToDraft() {
+        KnowledgeArticle article = article(10L, KnowledgeStatus.PENDING_REVIEW);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(article, article);
+        when(knowledgeMapper.updateById(article)).thenReturn(1);
+
+        assertThrows(BusinessException.class, () -> knowledgeService.review(
+                10L, KnowledgeReviewDecision.REJECT, " ", 11L, 3L));
+        KnowledgeArticle rejected = knowledgeService.review(
+                10L, KnowledgeReviewDecision.REJECT, "补充回滚后的验证结果", 11L, 3L);
+
+        assertEquals(KnowledgeStatus.DRAFT, rejected.getStatus());
+        assertEquals("补充回滚后的验证结果", rejected.getReviewComment());
+        assertNull(rejected.getReviewDueAt());
+        verify(articleVersionService).record(article, 11L, "REVIEW_REJECTED");
+    }
+
+    @Test
+    void onlySubmitterOrAdminCanWithdrawPendingReview() {
+        KnowledgeArticle article = article(11L, KnowledgeStatus.PENDING_REVIEW);
+        article.setReviewRequestedBy(7L);
+        when(knowledgeMapper.selectOne(any(Wrapper.class))).thenReturn(article, article);
+        when(knowledgeMapper.updateById(article)).thenReturn(1);
+
+        assertThrows(BusinessException.class,
+                () -> knowledgeService.withdrawReview(11L, 8L, false, 3L));
+        KnowledgeArticle withdrawn = knowledgeService.withdrawReview(11L, 7L, false, 3L);
+
+        assertEquals(KnowledgeStatus.DRAFT, withdrawn.getStatus());
+        assertNull(withdrawn.getReviewRequestedBy());
+        assertFalse(withdrawn.getSensitiveDataChecked());
+        verify(articleVersionService).record(article, 7L, "REVIEW_WITHDRAWN");
     }
 
     @Test
@@ -205,7 +301,7 @@ class KnowledgeServiceTest {
         article.setTitle("VPN 指南");
         article.setSlug("vpn-guide-" + id);
         article.setCategory("网络");
-        article.setContent("旧的排障内容");
+        article.setContent("本文说明 VPN 连接失败时的适用范围、前置条件、客户端日志定位、网关路由修复、连接恢复验证和失败回滚方法；同时记录预期现象、异常分支、检查命令、执行顺序与验证标准，确保不同处理人可以根据步骤完整复现问题、确认最终结果并在失败时安全恢复原配置。");
         article.setStatus(status);
         article.setVersion(0);
         article.setViewCount(0L);

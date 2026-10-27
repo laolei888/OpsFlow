@@ -99,10 +99,23 @@ class DatabaseMigrationIT {
     }
 
     @Test
-    void appliesEveryMigrationThroughV53() throws SQLException {
+    void appliesEveryMigrationThroughV57() throws SQLException {
         assertNotNull(flyway.info().current());
-        assertEquals("53", flyway.info().current().getVersion().getVersion());
-        assertEquals(53, flyway.info().applied().length);
+        assertEquals("57", flyway.info().current().getVersion().getVersion());
+        assertEquals(57, flyway.info().applied().length);
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'knowledge_articles'
+                       AND column_name IN ('review_requested_by', 'review_requested_at',
+                                           'reviewed_by', 'reviewed_at', 'review_comment',
+                                           'sensitive_data_checked', 'scope_defined',
+                                           'verification_steps_complete', 'review_due_at')
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            result.next();
+            assertEquals(9, result.getInt(1));
+        }
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
                      SELECT COUNT(*) FROM information_schema.columns

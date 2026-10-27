@@ -39,4 +39,18 @@ class KnowledgeControllerTest {
         verify(knowledgeService, never()).create(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void agentCannotApproveKnowledgeReview() {
+        KnowledgeController.ReviewDecisionRequest request = new KnowledgeController.ReviewDecisionRequest(
+                KnowledgeReviewDecision.APPROVE, "检查完成");
+        AuthPrincipal agent = new AuthPrincipal(8L, 3L, "agent",
+                List.of(new SimpleGrantedAuthority("ROLE_AGENT")));
+
+        assertThrows(BusinessException.class, () -> controller.review(4L, request, agent));
+
+        verify(knowledgeService, never()).review(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
 }
